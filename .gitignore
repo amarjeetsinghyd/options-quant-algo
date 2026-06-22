@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+
+# Node.js
+node_modules/
+package-lock.json
+
+# Environment Variables (CRITICAL: Never upload API keys!)
+.env
+
+# Data & Logs
+logs/
+data/
+*.csv
+
+# OS generated files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,8 @@
+SmartApi-Python
+pyotp
+logzero
+websocket-client
+pandas
+python-dotenv
+google-generativeai
+flask

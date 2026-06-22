@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quant Algo Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=2">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Quant <span>Algorithmic Terminal</span></h1>
+            <div class="controls">
+                <button id="btn-start" class="btn btn-primary" onclick="controlAlgo('start')">START ALGO</button>
+                <button id="btn-stop" class="btn btn-danger" onclick="controlAlgo('stop')" style="display: none;">STOP ALGO</button>
+                <div class="status-indicator">
+                    <span id="status-dot" class="dot dot-offline"></span>
+                    <span id="status-text">OFFLINE</span>
+                </div>
+            </div>
+        </header>
+
+        <div class="grid-telemetry">
+            <div class="card card-anchor">
+                <h3>Anchor Symbol</h3>
+                <div class="value" id="val-symbol" style="font-size: 1.2rem;">--</div>
+            </div>
+            <div class="card">
+                <h3>LTP <span id="ltp-time" style="font-size: 0.6em; color: #8892b0; font-weight: normal; margin-left: 5px;"></span></h3>
+                <div class="value" id="val-ltp">--</div>
+            </div>
+            <div class="card">
+                <h3>Volume <span id="volume-time" style="font-size: 0.6em; color: #8892b0; font-weight: normal; margin-left: 5px;"></span></h3>
+                <div class="value" id="val-volume">--</div>
+                <div style="width: 100%; background: rgba(255,255,255,0.1); height: 4px; border-radius: 2px; margin-top: 10px; overflow: hidden;">
+                    <div id="volume-bar" style="width: 0%; height: 100%; background: #00ff88; border-radius: 2px; transition: width 0.3s linear;"></div>
+                </div>
+            </div>
+            <div class="card">
+                <h3>VWAP</h3>
+                <div class="value" id="val-vwap">--</div>
+            </div>
+            <div class="card">
+                <div class="card-label">VFI (RAW / EMA)</div>
+                <div class="card-value" id="val-vfi">--</div>
+            </div>
+        </div>
+
+        <div class="active-trade-panel" id="active-trade-panel" style="display: none;">
+            <h2>🚨 ACTIVE PAPER TRADE 🚨</h2>
+            <div class="trade-grid">
+                <div>
+                    <label>Contract</label>
+                    <div class="val" id="trade-symbol" style="font-size: 1rem;">--</div>
+                </div>
+                <div>
+                    <label>Entry Price</label>
+                    <div class="val">₹<span id="trade-entry">--</span></div>
+                </div>
+                <div>
+                    <label>Target (Strict 10%)</label>
+                    <div class="val">₹<span id="trade-target">--</span></div>
+                </div>
+                <div>
+                    <label>Live Premium</label>
+                    <div class="val live">₹<span id="trade-ltp">--</span></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="metrics-panel" style="margin-top: 20px; background: rgba(30, 30, 40, 0.7); padding: 15px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.05); display: flex; justify-content: space-around; text-align: center;">
+            <div>
+                <div style="color: #8892b0; font-size: 12px; text-transform: uppercase;">Realized P&L</div>
+                <div id="metric-realized" style="font-size: 20px; font-weight: bold; color: #fff;">₹0.00</div>
+            </div>
+            <div>
+                <div style="color: #8892b0; font-size: 12px; text-transform: uppercase;">Net P&L (After ₹50/trade)</div>
+                <div id="metric-net" style="font-size: 20px; font-weight: bold; color: #fff;">₹0.00</div>
+            </div>
+            <div>
+                <div style="color: #8892b0; font-size: 12px; text-transform: uppercase;">Avg Capital Used</div>
+                <div id="metric-avg-cap" style="font-size: 20px; font-weight: bold; color: #ccd6f6;">₹0.00</div>
+            </div>
+            <div>
+                <div style="color: #8892b0; font-size: 12px; text-transform: uppercase;">Median Capital Used</div>
+                <div id="metric-med-cap" style="font-size: 20px; font-weight: bold; color: #ccd6f6;">₹0.00</div>
+            </div>
+        </div>
+
+        <div class="history-panel">
+            <h2>Trade History</h2>
+            <div style="overflow-x:auto;">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Time</th>
+                            <th>Duration</th>
+                            <th>Contract / DTE</th>
+                            <th>Entry ₹</th>
+                            <th>Exit ₹</th>
+                            <th>Opt %</th>
+                            <th>Idx Pts</th>
+                            <th>P&L ₹</th>
+                            <th>Result</th>
+                            <th>Links</th>
+                        </tr>
+                    </thead>
+                    <tbody id="history-table-body">
+                        <!-- Dynamic Content -->
+                    </tbody>
+                </table>
+            </div>
+            <div id="no-trades" class="empty-state">No trades executed today.</div>
+        </div>
+    </div>
+    
+    <!-- Modal for Bid/Ask Spread -->
+    <div id="spread-modal" style="display:none; position:fixed; z-index:100; left:0; top:0; width:100%; height:100%; background-color:rgba(0,0,0,0.8); align-items:center; justify-content:center;">
+        <div style="background-color:#1e293b; padding:2rem; border-radius:12px; width:80%; max-width:600px; border:1px solid #333;">
+            <span onclick="document.getElementById('spread-modal').style.display='none'" style="float:right; font-size:24px; cursor:pointer; color:#94a3b8;">&times;</span>
+            <h2 style="margin-top:0;">Bid/Ask Spread at Entry</h2>
+            <pre id="spread-data" style="background:#0f172a; padding:1rem; border-radius:8px; overflow-x:auto; color:#a5b4fc; font-family:monospace;"></pre>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='app.js') }}?v=4"></script>
+</body>
+</html>

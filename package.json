@@ -1,0 +1,14 @@
+{
+  "name": "quant-algo-terminal",
+  "version": "1.0.0",
+  "description": "Desktop wrapper for Quant Algo",
+  "main": "desktop.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "author": "Amarjeet Singh",
+  "license": "ISC",
+  "dependencies": {
+    "electron": "^31.0.0"
+  }
+}
