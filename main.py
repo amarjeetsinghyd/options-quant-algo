@@ -15,12 +15,27 @@ import sys
 
 app = Flask(__name__, template_folder='src/web/templates', static_folder='src/web/static')
 
+# Load history if exists
+history_data = []
+if os.path.exists("trade_history.json"):
+    try:
+        with open("trade_history.json", 'r') as f:
+            history_data = json.load(f)
+    except: pass
+
 # Global State for Telemetry
 state = {
     "status": "stopped",
     "telemetry": {},
     "active_trade": None,
-    "history": []
+    "history": history_data,
+    "order_flow": {
+        "token": None,
+        "buy_vol": 0,
+        "sell_vol": 0,
+        "delta": 0,
+        "last_price": 0
+    }
 }
 
 def algo_loop():
@@ -101,12 +116,15 @@ def algo_loop():
             live_volume_minute = now.minute
             
         # Accumulate tick volume and update LTP
+        is_market_open = (now.hour == 9 and now.minute >= 15) or (9 < now.hour < 15) or (now.hour == 15 and now.minute <= 30)
+
         if isinstance(message, dict):
             token = message.get('token')
             ltq = message.get('last_traded_quantity', 0)
             ltp = message.get('last_traded_price', 0)
             
-            if token and ltq > 0:
+            # Only accumulate volume strictly during live market hours to avoid offline ghost ticks
+            if token and ltq > 0 and is_market_open:
                 current_minute_volume_tracker[token] = current_minute_volume_tracker.get(token, 0) + ltq
                 
                 # Stream Live Volume to Dashboard
@@ -120,8 +138,56 @@ def algo_loop():
                 state["telemetry"]["ltp"] = live_ltp
                 state["telemetry"]["ltp_time"] = datetime.now().strftime("%H:%M:%S")
                 
-            if trader.current_trade and token == trader.current_trade['token'] and ltp > 0:
-                state["active_trade"]["current_ltp"] = float(ltp / 100)
+            if state.get("subscribed_option") == token and ltp > 0:
+                live_opt_ltp = float(ltp / 100)
+                
+                if trader.current_trade and token == trader.current_trade['token']:
+                    state["active_trade"]["current_ltp"] = live_opt_ltp
+                
+                # Order Flow / Delta Calculation Logic
+                if state["order_flow"]["token"] != token:
+                    # Reset tracker for new token
+                    state["order_flow"] = {
+                        "token": token, "buy_vol": 0, "sell_vol": 0, "delta": 0, "last_price": live_opt_ltp
+                    }
+                elif ltq > 0 and is_market_open:
+                    prev_price = state["order_flow"]["last_price"]
+                    best_ask = 0
+                    best_bid = 0
+                    
+                    # Try to use Market Depth (Bid/Ask) if available in SNAPQUOTE
+                    ask_data = message.get('best_5_sell_data', [])
+                    bid_data = message.get('best_5_buy_data', [])
+                    if ask_data and isinstance(ask_data, list):
+                        best_ask = ask_data[0].get('price', 0) / 100
+                    if bid_data and isinstance(bid_data, list):
+                        best_bid = bid_data[0].get('price', 0) / 100
+                        
+                    # Determine classification (Aggressive Buy vs Sell)
+                    is_buy = False
+                    if best_ask > 0 and live_opt_ltp >= best_ask:
+                        is_buy = True
+                    elif best_bid > 0 and live_opt_ltp <= best_bid:
+                        is_buy = False
+                    else:
+                        # Fallback: Tick Test
+                        if live_opt_ltp > prev_price:
+                            is_buy = True
+                        elif live_opt_ltp < prev_price:
+                            is_buy = False
+                        else:
+                            # If price unchanged, we can default to buy or ignore. We'll ignore neutrality or keep previous (default buy here for simplicity if it ticked up)
+                            is_buy = state["order_flow"].get("last_was_buy", True)
+
+                    if is_buy:
+                        state["order_flow"]["buy_vol"] += ltq
+                        state["order_flow"]["delta"] += ltq
+                    else:
+                        state["order_flow"]["sell_vol"] += ltq
+                        state["order_flow"]["delta"] -= ltq
+                        
+                    state["order_flow"]["last_price"] = live_opt_ltp
+                    state["order_flow"]["last_was_buy"] = is_buy
 
     def on_open(wsapp):
         print("[WebSocket] Connected. Subscribing to 50 Nifty constituents and anchor...")
@@ -266,31 +332,38 @@ def algo_loop():
             # 4. Execution Engine
             if current_df is not None and live_ltp is not None:
                 if trader.current_trade is None and trader.pending_setup is None:
-                    # Scan for Master Setup
+                    # Scan for Master Setup (Breakout First)
                     signal = signal_gen.check_signal(current_df)
+                    
+                    # If no Breakout, scan for Rejection / Support
+                    if not signal:
+                        signal = signal_gen.check_rejection_signal(current_df)
+                        
                     if signal:
                         trader.register_setup(signal)
                         
                 elif trader.pending_setup is not None:
                     # SNIPER MODE: Hunting for Breakout Tick
-                    trader.sniper_hunt(live_ltp, current_df)
+                    trader.sniper_hunt(live_ltp, current_df, state["order_flow"])
                     
                 elif trader.current_trade is not None:
                     # Manage Open Trade Limits
                     trader.manage_open_trade(live_ltp, current_df)
                     
-            # 4. Sync UI State
+            # 4. Sync UI State & WebSocket Subscription
+            opt_token = None
             if trader.current_trade:
-                # Dynamically subscribe to the option if not already subscribed
-                if state.get("subscribed_option") != trader.current_trade['token']:
-                    subscribe_option(trader.current_trade['token'])
-                    state["subscribed_option"] = trader.current_trade['token']
-                
+                opt_token = trader.current_trade['token']
                 state["active_trade"] = trader.current_trade
-                # Option LTP is seamlessly handled by the WebSocket `on_data` event
+            elif trader.pending_setup:
+                opt_token = trader.pending_setup.get('candidate_token')
+                state["active_trade"] = None
             else:
                 state["active_trade"] = None
-                state["subscribed_option"] = None
+                
+            if opt_token and state.get("subscribed_option") != opt_token:
+                subscribe_option(opt_token)
+                state["subscribed_option"] = opt_token
                 
         # Fast 2-Second Sniper Polling Loop
         time.sleep(2)
@@ -312,6 +385,50 @@ def control():
         state['status'] = 'stopped'
         state['telemetry'] = {}
     return jsonify({"success": True})
+
+@app.route('/api/settings', methods=['GET', 'POST'])
+def api_settings():
+    env_file = '.env'
+    if request.method == 'GET':
+        settings = {"ANGEL_API_KEY": "", "ANGEL_CLIENT_ID": "", "ANGEL_PASSWORD": "", "ANGEL_TOTP_SECRET": ""}
+        if os.path.exists(env_file):
+            with open(env_file, 'r') as f:
+                for line in f:
+                    if '=' in line:
+                        k, v = line.strip().split('=', 1)
+                        if k in settings:
+                            settings[k] = v
+        return jsonify(settings)
+    
+    if request.method == 'POST':
+        data = request.json
+        lines = []
+        if os.path.exists(env_file):
+            with open(env_file, 'r') as f:
+                lines = f.readlines()
+        
+        # Update or append
+        new_lines = []
+        updated_keys = set()
+        for line in lines:
+            if '=' in line:
+                k, v = line.strip().split('=', 1)
+                if k in data:
+                    new_lines.append(f"{k}={data[k]}\n")
+                    updated_keys.add(k)
+                else:
+                    new_lines.append(line)
+            else:
+                new_lines.append(line)
+                
+        for k, v in data.items():
+            if k not in updated_keys:
+                new_lines.append(f"{k}={v}\n")
+                
+        with open(env_file, 'w') as f:
+            f.writelines(new_lines)
+            
+        return jsonify({"success": True})
 
 def start_server():
     app.run(port=5000, debug=False, use_reloader=False)

@@ -18,8 +18,14 @@ def get_angel_connection():
     """
     Initializes and returns the Angel One SmartConnect object.
     """
+    load_dotenv(override=True)
+    api_key = os.getenv("ANGEL_API_KEY")
+    client_id = os.getenv("ANGEL_CLIENT_ID")
+    password = os.getenv("ANGEL_PASSWORD")
+    totp_secret = os.getenv("ANGEL_TOTP_SECRET")
+
     if not all([api_key, client_id, password, totp_secret]):
-        raise ValueError("Angel API credentials not fully provided. Please check your .env file.")
+        raise ValueError("Angel API credentials not fully provided. Please check your .env file or Settings.")
         
     # Initialize the SmartConnect API client
     smartApi = SmartConnect(api_key=api_key)

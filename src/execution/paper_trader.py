@@ -16,15 +16,18 @@ class PaperTrader:
         self.cooldown_until = None
         self.last_trade_date = None
         self.history_list = history_list if history_list is not None else []
-        self.csv_file = "trade_history.csv"
+        self.history_file = "trade_history.json"
         self.depth_file = "slippage_data.json"
         
-        if not os.path.exists(self.csv_file):
-            with open(self.csv_file, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                writer.writerow(["#", "Date", "Entry", "Exit", "Dur (min)", "Index", "Type", "Strike", "Expiry", "DTE", 
-                                 "Entry ₹", "Exit ₹", "Opt Δ₹", "Opt %", "Index Entry", "Index Exit", "Nifty Pts", 
-                                 "Delta", "Gamma", "Theta", "Vega", "ATM", "OTM Strikes", "Net P&L ₹", "Result", "Chart", "Description"])
+        # Load history from JSON if it exists
+        if os.path.exists(self.history_file):
+            try:
+                with open(self.history_file, 'r', encoding='utf-8') as f:
+                    self.history_list = json.load(f)
+                    self.trades_today = len([t for t in self.history_list if t.get('date', '').startswith(datetime.now().strftime('%d %b'))])
+            except Exception as e:
+                print(f"Error loading history file: {e}")
+                self.history_list = []
 
     def reset_daily(self):
         today = datetime.now().date()
@@ -56,13 +59,24 @@ class PaperTrader:
         if self.cooldown_until and now < self.cooldown_until:
             return
             
+        # Find candidate option early so we can track its Order Flow
+        opt_row, entry_price = self.select_option(signal["type"])
+        if opt_row is None:
+            print("Sniper Aborted: Could not find option candidate in premium bounds.")
+            return
+            
+        signal["candidate_token"] = opt_row['token']
+        signal["candidate_symbol"] = opt_row['symbol']
+        signal["candidate_price"] = entry_price
+        
         self.pending_setup = signal
-        # Use current system time for the 3-minute expiration, NOT the dataframe timestamp
+        # Use current system time for the 3-minute expiration
         self.pending_setup["expiry_time"] = now + timedelta(minutes=3)
         print(f"[{now.time()}] MASTER SETUP LOCKED: {signal['type']} | High: {signal['master_high']} | Low: {signal['master_low']}")
-        print("Entering 3-Minute SNIPER MODE...")
+        print(f"Selected Candidate: {signal['candidate_symbol']} at ₹{entry_price}")
+        print("Entering 3-Minute SNIPER MODE... Tracking Candidate Order Flow.")
 
-    def sniper_hunt(self, live_ltp, current_nifty_df):
+    def sniper_hunt(self, live_ltp, current_nifty_df, order_flow_state):
         if not self.pending_setup:
             return
             
@@ -83,8 +97,13 @@ class PaperTrader:
             triggered = True
             
         if triggered:
-            print(f"!!! SNIPER TRIGGERED !!! Live price {live_ltp} broke Master Setup.")
-            self._execute_trade(setup, current_nifty_df)
+            delta = order_flow_state.get("delta", 0)
+            if delta > 0:
+                print(f"!!! SNIPER TRIGGERED !!! Live price {live_ltp} broke Master Setup. Delta is POSITIVE ({delta}). Executing...")
+                self._execute_trade(setup, current_nifty_df)
+            else:
+                print(f"!!! FAKE BREAKOUT DETECTED !!! Live price {live_ltp} broke Master Setup, but Candidate Delta is NEGATIVE or FLAT ({delta}). Trade Aborted.")
+                self.pending_setup = None
 
     def select_option(self, signal_type):
         weekly_opts = self.data_fetcher.get_weekly_option_tokens()
@@ -127,12 +146,41 @@ class PaperTrader:
 
     def _execute_trade(self, setup, current_nifty_df):
         params = self.get_instrument_params()
-        opt_row, entry_price = self.select_option(setup["type"])
         
-        if opt_row is None:
-            print("Sniper Aborted: Could not find option in premium bounds.")
+        # We already selected the candidate during register_setup
+        token = setup.get('candidate_token')
+        symbol = setup.get('candidate_symbol')
+        entry_price = setup.get('candidate_price')
+        strategy = setup.get('strategy', 'VWAP_BREAKOUT')
+        
+        if not token:
+            print("Sniper Aborted: No valid candidate token attached.")
             self.pending_setup = None
             return
+            
+        # Parse expiry and strike from symbol (Assumes standard format)
+        # We need the opt_row again or we can fetch it. Actually, better to fetch the latest LTP instead of relying on the candidate price from minutes ago.
+        weekly_opts = self.data_fetcher.get_weekly_option_tokens()
+        opt_row_df = weekly_opts[weekly_opts['token'] == token]
+        
+        if opt_row_df.empty:
+            print("Sniper Aborted: Candidate token not found in chain.")
+            self.pending_setup = None
+            return
+            
+        opt_row = opt_row_df.iloc[0]
+        expiry = opt_row['expiry']
+        strike = float(opt_row['strike']) / 100 
+        
+        name, exch_seg = self.data_fetcher.get_active_instrument()
+        
+        # Refresh the entry price to the absolute LIVE LTP
+        try:
+            market_response = self.api.marketData("LTP", {exch_seg: [token]})
+            if market_response and market_response.get('status') and market_response.get('data'):
+                entry_price = market_response['data']['fetched'][0]['ltp']
+        except:
+            pass
             
         token = opt_row['token']
         symbol = opt_row['symbol']
@@ -191,8 +239,9 @@ class PaperTrader:
             "greeks": greeks,
             "params": params,
             "exch_seg": exch_seg,
-            "setup_high": setup["master_high"],
-            "setup_low": setup["master_low"],
+            "setup_high": setup.get("master_high", 0),
+            "setup_low": setup.get("master_low", 0),
+            "strategy": strategy,
             "status": "OPEN",
             "slippage": depth_data,
             "start_time": time.time()
@@ -277,25 +326,10 @@ class PaperTrader:
         mins, secs = divmod(int(dur_secs), 60)
         dur_str = f"{mins:02d}:{secs:02d}"
         
-        row_id = 1
-        if os.path.exists(self.csv_file):
-            with open(self.csv_file, 'r', encoding='utf-8') as f:
-                row_id = sum(1 for line in f)
+        row_id = len(self.history_list) + 1
                 
         chart_file = f"trade_{row_id}.png"
         generate_trade_chart(current_nifty_df, t, exit_time, net_pl, result, chart_file)
-        
-        row = [
-            row_id, t['entry_time'].strftime("%d %b"), t['entry_time'].strftime("%H:%M:%S.%f")[:-3], exit_time.strftime("%H:%M:%S.%f")[:-3],
-            dur_str, t['params']['index_name'], t['type'], t['strike'], t['expiry'], dte,
-            t['entry_price'], exit_price, round(opt_diff, 2), f"{opt_pct:.2f}%", t['index_entry'], index_exit, round(nifty_pts, 2),
-            calc_delta, t['greeks']['gamma'], t['greeks']['theta'], t['greeks']['vega'], atm, otm_str, round(net_pl, 2), result,
-            f"/static/charts/{chart_file}", reason
-        ]
-        
-        with open(self.csv_file, 'a', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            writer.writerow(row)
             
         # Calculate extra journal metrics
         duration_sec = time.time() - t.get('start_time', 0)
@@ -315,10 +349,11 @@ class PaperTrader:
             pass
             
         self.history_list.append({
-            "id": self.trades_today,
-            "date": datetime.now().strftime('%H:%M:%S'),
+            "id": row_id,
+            "date": datetime.now().strftime('%d %b %H:%M:%S'),
             "duration": duration_str,
             "symbol": f"{t['type']} {t['strike']} ({dte} DTE)",
+            "strategy": t.get('strategy', 'VWAP_BREAKOUT'),
             "entry_price": t['entry_price'],
             "exit_price": exit_price,
             "opt_pct": round(opt_pct, 2),
@@ -330,6 +365,10 @@ class PaperTrader:
             "result": result,
             "slippage": t.get("slippage", {})
         })
+        
+        # Save JSON file
+        with open(self.history_file, 'w', encoding='utf-8') as f:
+            json.dump(self.history_list, f, indent=4)
         
         print(f"--- TRADE CLOSED ---")
         print(f"Result: {result} | P&L: ₹{round(net_pl, 2)}")

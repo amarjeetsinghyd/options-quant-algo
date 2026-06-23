@@ -54,10 +54,36 @@ if (!gotTheLock) {
             icon: path.join(__dirname, 'icon.ico') // Optional icon
         });
 
-        // Give Python 2 seconds to boot the Flask server before loading
-        setTimeout(() => {
-            mainWindow.loadURL('http://127.0.0.1:5000');
-        }, 2000);
+        // Give Python time to boot the Flask server before loading
+        const maxRetries = 30;
+        let retries = 0;
+        const checkServer = () => {
+            const http = require('http');
+            const req = http.get('http://127.0.0.1:5000', (res) => {
+                if (res.statusCode === 200) {
+                    mainWindow.loadURL('http://127.0.0.1:5000');
+                } else {
+                    retry();
+                }
+            }).on('error', (err) => {
+                retry();
+            });
+            req.end();
+        };
+
+        const retry = () => {
+            retries++;
+            if (retries < maxRetries) {
+                setTimeout(checkServer, 1000);
+            } else {
+                console.log("Failed to connect to Python server after 30 seconds.");
+                // Load anyway so dev tools can be opened to debug, or show an error
+                mainWindow.loadURL('http://127.0.0.1:5000');
+            }
+        };
+
+        // Start checking after 1 second
+        setTimeout(checkServer, 1000);
 
         // 3. System Tray Logic
         // Intercept close (X) button to hide instead of quit
