@@ -25,7 +25,6 @@ NIFTY_CONSTITUENTS = {
     "COALINDIA": "20374",
     "DRREDDY": "881",
     "EICHERMOT": "910",
-    "ETERNAL": "5097",
     "GRASIM": "1232",
     "HCLTECH": "7229",
     "HDFCBANK": "1333",
@@ -57,10 +56,11 @@ NIFTY_CONSTITUENTS = {
     "TCS": "11536",
     "TECHM": "13538",
     "TITAN": "3506",
-    "TMPV": "3456",
     "TRENT": "1964",
     "ULTRACEMCO": "11532",
     "WIPRO": "3787",
+    "INDUSINDBK": "5258",
+    "HEROMOTOCO": "1348",
 }
 
 # Sensex 30 Constituents (Source: BSE 22-Jun-2026)
@@ -242,8 +242,8 @@ class DataFetcher:
                     
                     fetched_count += 1
                     
-                # Sleep 1200ms between calls to stay under strict rate limit
-                time.sleep(1.2)
+                # Sleep 400ms between calls (2.5 req/sec) to stay under strict 3 req/sec rate limit
+                time.sleep(0.4)
                 
             except Exception as e:
                 print(f"  Warning: Could not fetch volume for {stock_name}: {e}")

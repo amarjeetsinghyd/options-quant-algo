@@ -25,25 +25,46 @@ if (!gotTheLock) {
         const logPath = path.join(__dirname, 'logs', 'electron_python.log');
         const logStream = fs.createWriteStream(logPath, { flags: 'a' });
         
-        // 1. Spawn Python Engine using the virtual environment
-        logStream.write(`\n\n[${new Date().toISOString()}] Starting Python Background Engine...\n`);
-        const pythonExecutable = path.join(__dirname, 'venv', 'Scripts', 'python.exe');
-        pythonProcess = spawn(pythonExecutable, ['main.py'], {
-            cwd: __dirname,
-            windowsHide: true,
-        });
+        // 1. Python Engine Management
+        // We spawn the engine natively and invisibly using child_process.spawn
+        let pythonProcess = null;
+        let isIntentionalQuit = false;
 
-        pythonProcess.stdout.on('data', (data) => {
-            logStream.write(data);
-        });
+        function startPythonBackend() {
+            logStream.write(`\n\n[${new Date().toISOString()}] Booting Python backend natively...\n`);
+            
+            let pythonExecutable = path.join(__dirname, 'venv', 'Scripts', 'pythonw.exe');
+            if (!fs.existsSync(pythonExecutable)) {
+                pythonExecutable = 'python';
+            }
 
-        pythonProcess.stderr.on('data', (data) => {
-            logStream.write(`[ERROR] ${data}`);
-        });
+            pythonProcess = spawn(pythonExecutable, ['main.py'], {
+                cwd: __dirname,
+                windowsHide: true,
+                detached: true
+            });
 
-        pythonProcess.on('close', (code) => {
-            logStream.write(`[Python] process exited with code ${code}\n`);
-        });
+            pythonProcess.unref();
+
+            pythonProcess.stdout.on('data', (data) => {
+                logStream.write(`[PYTHON] ${data}`);
+            });
+
+            pythonProcess.stderr.on('data', (data) => {
+                logStream.write(`[PYTHON ERROR] ${data}`);
+            });
+
+            pythonProcess.on('close', (code, signal) => {
+                logStream.write(`[PYTHON] Process exited with code ${code} and signal ${signal}\n`);
+                if (!isIntentionalQuit) {
+                    logStream.write(`[PYTHON] Unexpected crash detected. Auto-restarting in 2 seconds...\n`);
+                    setTimeout(startPythonBackend, 2000);
+                }
+            });
+        }
+
+        // Start it for the first time
+        startPythonBackend();
 
         // 2. Create the Desktop Window
         mainWindow = new BrowserWindow({
@@ -112,16 +133,26 @@ if (!gotTheLock) {
 
         const contextMenu = Menu.buildFromTemplate([
             { label: 'Show Dashboard', click: () => mainWindow.show() },
-            { type: 'separator' },
             { 
-                label: 'Quit Algo Completely', 
+                label: 'Quit UI', 
                 click: () => {
                     app.isQuitting = true;
+                    app.quit();
+                } 
+            },
+            {
+                label: 'Quit Algo Completely (Stop Trading)',
+                click: () => {
+                    app.isQuitting = true;
+                    isIntentionalQuit = true;
                     if (pythonProcess) {
                         try {
-                            // Kill the python process tree on Windows
-                            spawn("taskkill", ["/pid", pythonProcess.pid, '/f', '/t']);
-                        } catch (e) {}
+                            process.kill(-pythonProcess.pid); // Kill process tree if detached
+                        } catch (e) {
+                            try {
+                                pythonProcess.kill('SIGINT');
+                            } catch(e2) {}
+                        }
                     }
                     app.quit();
                 } 
@@ -137,10 +168,6 @@ if (!gotTheLock) {
 
     // Cleanup on exit
     app.on('will-quit', () => {
-        if (pythonProcess) {
-            try {
-                spawn("taskkill", ["/pid", pythonProcess.pid, '/f', '/t']);
-            } catch (e) {}
-        }
+        // Python is managed by PM2, nothing to kill
     });
 }

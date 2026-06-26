@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Intelligence Lab | Quant Terminal</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=1.1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/intelligence_lab.css') }}?v=1.1">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <!-- Ionicons for modern icons -->
+    <script type="module" src="https://unpkg.com/ionicons@7.1.0/dist/ionicons/ionicons.esm.js"></script>
+    <script nomodule src="https://unpkg.com/ionicons@7.1.0/dist/ionicons/ionicons.js"></script>
+    <!-- Lightweight Charts for simple charting -->
+    <script src="{{ url_for('static', filename='lightweight-charts.min.js') }}"></script>
+    <!-- Chart.js for Pie and Bar charts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="app-wrapper">
+        <nav class="top-nav">
+            <div class="nav-brand">
+                <ion-icon name="flask-outline" class="brand-icon"></ion-icon>
+                <h1>Intelligence <span>Lab</span></h1>
+            </div>
+            <div class="nav-controls">
+                <button class="btn" onclick="window.location.href='/'" title="Back to Live Terminal">
+                    <ion-icon name="arrow-back-outline"></ion-icon> Live Terminal
+                </button>
+                <button id="refresh-lab" class="icon-btn" title="Refresh Analytics">
+                    <ion-icon name="refresh-outline"></ion-icon>
+                </button>
+            </div>
+        </nav>
+
+        <main class="lab-container">
+            <!-- Phase 4.2: Health & Reliability -->
+            <div class="dashboard-grid" style="margin-bottom: 20px;">
+                <section class="lab-section" id="section-system-health">
+                    <h2><ion-icon name="pulse-outline"></ion-icon> System Health Monitor</h2>
+                    <ul class="insight-list" id="system-health-list">
+                        <li>Loading...</li>
+                    </ul>
+                </section>
+                <section class="lab-section" id="section-db-freshness">
+                    <h2><ion-icon name="server-outline"></ion-icon> Database Freshness</h2>
+                    <ul class="insight-list" id="db-freshness-list">
+                        <li>Loading...</li>
+                    </ul>
+                </section>
+                <section class="lab-section" id="section-confidence">
+                    <h2><ion-icon name="shield-checkmark-outline"></ion-icon> Research Confidence</h2>
+                    <div id="confidence-content" style="text-align:center; padding: 10px;">
+                        <div style="font-size:20px; font-weight:800; margin-bottom:10px;" id="confidence-level">Loading...</div>
+                        <div style="color:var(--text-secondary); font-size:14px;" id="confidence-msg">...</div>
+                        <div style="display:flex; justify-content:space-around; margin-top:15px; font-size:12px;">
+                            <div><span id="conf-sig">0</span><br>Total Signals</div>
+                            <div><span id="conf-exe">0</span><br>Executed</div>
+                            <div><span id="conf-rej">0</span><br>Rejected</div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Section 1: Overview -->
+            <section class="lab-section" id="section-overview">
+                <h2><ion-icon name="stats-chart"></ion-icon> System Overview</h2>
+                <div class="metrics-grid" id="overview-metrics">
+                    <!-- Populated by JS -->
+                </div>
+            </section>
+
+            <!-- Section 11: Machine Insights -->
+            <section class="lab-section highlight-section" id="section-insights">
+                <h2><ion-icon name="bulb"></ion-icon> Machine Insights</h2>
+                <ul class="insight-list" id="insights-list">
+                    <!-- Populated by JS -->
+                </ul>
+            </section>
+            
+            <div class="dashboard-grid">
+                <!-- Section 3: Strike Intelligence -->
+                <section class="lab-section" id="section-strike">
+                    <h2>Strike Intelligence</h2>
+                    <div class="table-responsive">
+                        <table id="strike-table">
+                            <thead>
+                                <tr>
+                                    <th>Strike</th>
+                                    <th>Obsv</th>
+                                    <th>Hit%</th>
+                                    <th>Median(s)</th>
+                                    <th>Max Fav%</th>
+                                    <th>Max Adv%</th>
+                                    <th>Efficiency</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- Section 4: Premium Intelligence -->
+                <section class="lab-section" id="section-premium">
+                    <h2>Premium Intelligence</h2>
+                    <div class="table-responsive">
+                        <table id="premium-table">
+                            <thead>
+                                <tr>
+                                    <th>Bucket</th>
+                                    <th>Win%</th>
+                                    <th>Speed(s)</th>
+                                    <th>Slippage</th>
+                                    <th>Gamma Adv</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+
+            <div class="dashboard-grid">
+                <!-- Section 5: Time Intelligence -->
+                <section class="lab-section" id="section-time">
+                    <h2>Time Intelligence</h2>
+                    <div class="chart-container" style="position: relative; height:250px; width:100%">
+                        <canvas id="timeChart"></canvas>
+                    </div>
+                </section>
+
+                <!-- Section 6: Filter Intelligence -->
+                <section class="lab-section" id="section-filters">
+                    <h2>Filter Intelligence</h2>
+                    <div class="table-responsive">
+                        <table id="filter-table">
+                            <thead>
+                                <tr>
+                                    <th>Filter</th>
+                                    <th>Rejected</th>
+                                    <th>Correct</th>
+                                    <th>False</th>
+                                    <th>Protection%</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+
+            <div class="dashboard-grid">
+                <!-- Section 7: Order Flow -->
+                <section class="lab-section" id="section-orderflow">
+                    <h2>Order Flow Intelligence</h2>
+                    <div class="metrics-grid col-2" id="orderflow-metrics">
+                        <!-- Populated by JS -->
+                    </div>
+                </section>
+
+                <!-- Section 10: Market Environment -->
+                <section class="lab-section" id="section-market">
+                    <h2>Market Environment</h2>
+                    <div class="metrics-grid col-2" id="market-metrics">
+                        <!-- Populated by JS -->
+                    </div>
+                </section>
+            </div>
+            
+            <!-- Section 8 & 9: Execution & Scaling -->
+            <section class="lab-section" id="section-execution">
+                <h2>Execution & Capital Scaling</h2>
+                <div class="table-responsive">
+                    <table id="execution-table">
+                        <thead>
+                            <tr>
+                                <th>Strike</th>
+                                <th>Avg Spread</th>
+                                <th>Entry Slip</th>
+                                <th>Exit Slip</th>
+                                <th>Avg Liq Qty</th>
+                                <th>Safe Lots</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- ============================================== -->
+            <!-- PHASE 4.1 ADVANCED SENSORS SECTION             -->
+            <!-- ============================================== -->
+            
+            <h2 class="section-divider"><ion-icon name="hardware-chip-outline"></ion-icon> Phase 4.1 Advanced Sensors</h2>
+            
+            <div class="dashboard-grid">
+                <!-- Section 12: OFA Health -->
+                <section class="lab-section" id="section-ofa-health">
+                    <h2>OFA Health & Stability</h2>
+                    <div class="metrics-grid col-2" id="ofa-health-metrics">
+                        <!-- Populated by JS -->
+                    </div>
+                </section>
+
+                <!-- Section 13: VFI Edge -->
+                <section class="lab-section" id="section-vfi-edge">
+                    <h2>VFI Quality Intelligence</h2>
+                    <div class="metrics-grid col-2" id="vfi-edge-metrics">
+                        <!-- Populated by JS -->
+                    </div>
+                </section>
+            </div>
+
+            <div class="dashboard-grid">
+                <!-- Section 14: Target Optimization -->
+                <section class="lab-section" id="section-target-opt">
+                    <h2>Alternative Target Simulator</h2>
+                    <div class="table-responsive">
+                        <table id="target-opt-table">
+                            <thead>
+                                <tr>
+                                    <th>Target</th>
+                                    <th>Hit Rate</th>
+                                    <th>Avg Time</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- Section 15: Failure Analysis -->
+                <section class="lab-section" id="section-failure-dna">
+                    <h2>Failed Trade DNA</h2>
+                    <div class="metrics-grid col-2" id="failure-dna-metrics">
+                        <!-- Populated by JS -->
+                    </div>
+                </section>
+            </div>
+
+
+            <!-- ============================================== -->
+            <!-- PHASE 4.3 MARKET REGIME & TRADE QUALITY        -->
+            <!-- ============================================== -->
+            
+            <h2 class="section-divider"><ion-icon name="analytics-outline"></ion-icon> Phase 4.3 Trade Quality Intelligence</h2>
+            
+            <div class="dashboard-grid">
+                <!-- Section: Market Regime Intelligence -->
+                <section class="lab-section">
+                    <h2>Market Regime Hit Rates</h2>
+                    <div id="market-regime-content">
+                        <div class="stat-value">Loading...</div>
+                    </div>
+                </section>
+
+                <!-- Section: ATR Intelligence -->
+                <section class="lab-section">
+                    <h2>ATR Expansion Ratio</h2>
+                    <div id="atr-intel-content">
+                        <div class="stat-value">Loading...</div>
+                    </div>
+                </section>
+            </div>
+
+            <div class="dashboard-grid">
+                <!-- Section: VWAP Health -->
+                <section class="lab-section">
+                    <h2>EMA-VWAP Distance Optimals</h2>
+                    <div id="vwap-health-content">
+                        <div class="stat-value">Loading...</div>
+                    </div>
+                </section>
+
+                <!-- Section: VFI Intelligence -->
+                <section class="lab-section">
+                    <h2>VFI Divergence & Alignment</h2>
+                    <div id="vfi-intel-content">
+                        <div class="stat-value">Loading...</div>
+                    </div>
+                </section>
+            </div>
+
+            <div class="dashboard-grid">
+                <!-- Section: Trade Quality Distribution -->
+                <section class="lab-section" style="grid-column: 1 / -1;">
+                    <h2>Overall Trade Quality Distribution</h2>
+                    <div id="trade-quality-content">
+                        <div class="stat-value">Loading...</div>
+                    </div>
+                </section>
+            </div>
+            <!-- Phase 5: Shadow ML Brain -->
+            <div class="lab-header" style="margin-top: 40px; margin-bottom: 20px;">
+                <h1>Phase 5 — Shadow ML Brain & Gamma Discovery Lab</h1>
+            </div>
+            
+            <!-- Phase 5 Filter Bar -->
+            <div class="filter-bar" style="margin-bottom: 20px; display: flex; gap: 15px; flex-wrap: wrap; background: rgba(255,255,255,0.02); padding: 15px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); align-items: center;">
+                <div class="filter-group" style="display: flex; align-items: center; gap: 8px;">
+                    <label style="font-size: 13px; color: var(--text-secondary);">Session:</label>
+                    <select id="filter-session" style="background: #111; color: #fff; border: 1px solid rgba(255,255,255,0.1); padding: 5px 10px; border-radius: 4px; font-family: inherit;">
+                        <option value="ALL">All Sessions</option>
+                        <option value="LIVE">Live Only</option>
+                        <option value="SIMULATION">Simulation Only</option>
+                        <option value="REPLAY">Replay Only</option>
+                        <option value="UNIT_TEST">Unit Test Only</option>
+                    </select>
+                </div>
+                <div class="filter-group" style="display: flex; align-items: center; gap: 8px;">
+                    <label style="font-size: 13px; color: var(--text-secondary);">Min Quality:</label>
+                    <select id="filter-quality" style="background: #111; color: #fff; border: 1px solid rgba(255,255,255,0.1); padding: 5px 10px; border-radius: 4px; font-family: inherit;">
+                        <option value="0">All Quality</option>
+                        <option value="90">Quality > 90</option>
+                    </select>
+                </div>
+                <div class="filter-group" style="display: flex; align-items: center; gap: 8px;">
+                    <label style="font-size: 13px; color: var(--text-secondary);">Version:</label>
+                    <input type="text" id="filter-version" placeholder="e.g. v5.2" style="background: #111; color: #fff; border: 1px solid rgba(255,255,255,0.1); padding: 5px 10px; border-radius: 4px; width: 80px; font-family: inherit;">
+                </div>
+                <div class="filter-group" style="display: flex; align-items: center; gap: 8px;">
+                    <label style="font-size: 13px; color: var(--text-secondary);">Source:</label>
+                    <input type="text" id="filter-source" placeholder="e.g. WEBSOCKET" style="background: #111; color: #fff; border: 1px solid rgba(255,255,255,0.1); padding: 5px 10px; border-radius: 4px; width: 120px; font-family: inherit;">
+                </div>
+                <button id="apply-ml-filters" class="btn" style="padding: 6px 15px; border-radius: 4px; font-weight: 600; cursor: pointer; background: var(--primary-color, #00d2ff); color: #000; border: none; font-family: inherit;">Apply Filters</button>
+            </div>
+            
+            <div class="dashboard-grid" style="margin-bottom: 20px;">
+                <!-- ML Maturity & Quality Distribution -->
+                <section class="lab-section">
+                    <h2><ion-icon name="hardware-chip-outline"></ion-icon> ML Maturity & Quality Distribution</h2>
+                    <div id="ml-maturity-content" style="text-align: center; padding: 10px; margin-bottom: 15px;">
+                        <div style="font-size: 20px; font-weight: 800;" id="ml-maturity-level">Loading...</div>
+                        <div style="color: var(--text-secondary); font-size: 14px;" id="ml-maturity-samples">0 samples collected</div>
+                    </div>
+                    <div class="table-responsive">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Quality Grade</th>
+                                    <th>Classification</th>
+                                    <th>Samples</th>
+                                </tr>
+                            </thead>
+                            <tbody id="quality-dist-tbody">
+                                <tr><td colspan="3">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+                
+                <!-- Data Quality Audit Monitor -->
+                <section class="lab-section">
+                    <h2><ion-icon name="shield-checkmark-outline"></ion-icon> Data Quality & Validator Audit</h2>
+                    <div class="metrics-grid col-2" id="data-quality-metrics" style="margin-bottom: 15px;">
+                        <div class="metric-card">
+                            <h3>Total Issues</h3>
+                            <div class="val" id="dq-total">0</div>
+                        </div>
+                        <div class="metric-card">
+                            <h3>Bad Ticks</h3>
+                            <div class="val" id="dq-bad-ticks" style="color: #ff4a4a;">0</div>
+                        </div>
+                    </div>
+                    <div class="table-responsive">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Timestamp</th>
+                                    <th>Symbol</th>
+                                    <th>Type</th>
+                                    <th>Value</th>
+                                    <th>Status</th>
+                                    <th>Session</th>
+                                    <th>Quality</th>
+                                    <th>Connection</th>
+                                    <th>Version</th>
+                                    <th>Source</th>
+                                </tr>
+                            </thead>
+                            <tbody id="dq-logs-tbody">
+                                <tr><td colspan="10" style="text-align: center; color: var(--text-secondary);">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+
+            <div class="dashboard-grid" style="margin-bottom: 20px;">
+                <!-- Missed Opportunity Intelligence (Failed Ignition) -->
+                <section class="lab-section" style="grid-column: 1 / -1;">
+                    <h2><ion-icon name="warning-outline"></ion-icon> Missed Opportunity Analyzer (Failed Ignitions - Quality 1)</h2>
+                    <div class="table-responsive">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Timestamp</th>
+                                    <th>Symbol</th>
+                                    <th>Max Attempted Move</th>
+                                    <th>Rejection Retrace</th>
+                                    <th>Detectable Failure Reason</th>
+                                    <th>Session</th>
+                                    <th>Quality</th>
+                                    <th>Connection</th>
+                                    <th>Version</th>
+                                    <th>Source</th>
+                                </tr>
+                            </thead>
+                            <tbody id="failed-ignition-tbody">
+                                <tr><td colspan="10" style="text-align: center; color: var(--text-secondary);">No failed ignitions logged yet. Waiting for market action.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+
+            <div class="dashboard-grid" style="margin-bottom: 20px;">
+                <!-- Feature Importance & Regime Stability -->
+                <section class="lab-section">
+                    <h2><ion-icon name="git-branch-outline"></ion-icon> Feature Importance & Regime Stability</h2>
+                    <div class="table-responsive">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Feature Name</th>
+                                    <th>Regime</th>
+                                    <th>Avg Importance</th>
+                                    <th>Drift Warnings</th>
+                                </tr>
+                            </thead>
+                            <tbody id="feature-regimes-tbody">
+                                <tr><td colspan="4">No importance history logged yet. Runs outside market hours.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+                
+                <!-- Recent Explosive Discoveries (Quality 4) & Replay Paths -->
+                <section class="lab-section">
+                    <h2><ion-icon name="rocket-outline"></ion-icon> Recent Explosive Discoveries & Premium Paths</h2>
+                    <div class="table-responsive">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Timestamp</th>
+                                    <th>Symbol</th>
+                                    <th>Burst %</th>
+                                    <th>Path (Start → Peak)</th>
+                                    <th>Session</th>
+                                    <th>Quality</th>
+                                    <th>Connection</th>
+                                    <th>Version</th>
+                                    <th>Source</th>
+                                </tr>
+                            </thead>
+                            <tbody id="explosive-discoveries-tbody">
+                                <tr><td colspan="9" style="text-align: center; color: var(--text-secondary);">No explosive bursts logged yet. Scanning...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+
+        </main>
+    </div>
+
+    <!-- Modular JS loading -->
+    <script src="{{ url_for('static', filename='js/intelligence/overview_panel.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/intelligence/insights_panel.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/intelligence/strike_panel.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/intelligence/premium_panel.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/intelligence/time_panel.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/intelligence/filter_panel.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/intelligence/orderflow_panel.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/intelligence/market_panel.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/intelligence/execution_panel.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/intelligence/phase41_panels.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/intelligence/phase42_panels.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/intelligence/phase43_panels.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/intelligence/phase5_panels.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/intelligence/intelligence_main.js') }}"></script>
+</body>
+</html>

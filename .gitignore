@@ -5,18 +5,37 @@ __pycache__/
 venv/
 .venv/
 env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
 # Node.js
 node_modules/
-package-lock.json
 
 # Environment Variables (CRITICAL: Never upload API keys!)
 .env
+.env.*
+!.env.example
 
 # Data & Logs
 logs/
 data/
+models/
 *.csv
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
+
+# Local helper scripts
+append_ml.py
 
 # OS generated files
 .DS_Store

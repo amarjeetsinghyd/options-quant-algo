@@ -1,0 +1,160 @@
+{
+    "features": {
+        "market_regime": {
+            "calculation_version": "v1",
+            "created_date": "2026-06-25",
+            "active_status": true,
+            "allowed_for_training": true
+        },
+        "atr_current": {
+            "calculation_version": "v1",
+            "created_date": "2026-06-25",
+            "active_status": true,
+            "allowed_for_training": true
+        },
+        "atr_expansion_ratio": {
+            "calculation_version": "v1",
+            "created_date": "2026-06-25",
+            "active_status": true,
+            "allowed_for_training": true
+        },
+        "compression_score": {
+            "calculation_version": "v1",
+            "created_date": "2026-06-25",
+            "active_status": true,
+            "allowed_for_training": true
+        },
+        "vfi_value": {
+            "calculation_version": "v1",
+            "created_date": "2026-06-25",
+            "active_status": true,
+            "allowed_for_training": true
+        },
+        "vfi_angle": {
+            "calculation_version": "v1",
+            "created_date": "2026-06-25",
+            "active_status": true,
+            "allowed_for_training": true
+        },
+        "premium": {
+            "calculation_version": "v1",
+            "created_date": "2026-06-25",
+            "active_status": true,
+            "allowed_for_training": true
+        },
+        "dte": {
+            "calculation_version": "v1",
+            "created_date": "2026-06-25",
+            "active_status": true,
+            "allowed_for_training": true
+        },
+        "distance_from_atm": {
+            "calculation_version": "v1",
+            "created_date": "2026-06-25",
+            "active_status": true,
+            "allowed_for_training": true
+        },
+        "ofa_score": {
+            "calculation_version": "v1",
+            "created_date": "2026-06-25",
+            "active_status": true,
+            "allowed_for_training": true
+        },
+        "buyer_aggression": {
+            "calculation_version": "v1",
+            "created_date": "2026-06-25",
+            "active_status": true,
+            "allowed_for_training": true
+        },
+        "seller_aggression": {
+            "calculation_version": "v1",
+            "created_date": "2026-06-25",
+            "active_status": true,
+            "allowed_for_training": true
+        },
+        "premium_change_10s": {
+            "calculation_version": "v1",
+            "created_date": "2026-06-25",
+            "active_status": true,
+            "allowed_for_training": true
+        },
+        "premium_change_30s": {
+            "calculation_version": "v1",
+            "created_date": "2026-06-25",
+            "active_status": true,
+            "allowed_for_training": true
+        },
+        "premium_acceleration": {
+            "calculation_version": "v1",
+            "created_date": "2026-06-25",
+            "active_status": true,
+            "allowed_for_training": true
+        },
+        "distance_from_day_high": {
+            "calculation_version": "v1",
+            "created_date": "2026-06-25",
+            "active_status": true,
+            "allowed_for_training": true
+        },
+        "distance_from_day_low": {
+            "calculation_version": "v1",
+            "created_date": "2026-06-25",
+            "active_status": true,
+            "allowed_for_training": true
+        },
+        "range_position": {
+            "calculation_version": "v1",
+            "created_date": "2026-06-25",
+            "active_status": true,
+            "allowed_for_training": true
+        },
+        "body_expansion_ratio": {
+            "calculation_version": "v1",
+            "created_date": "2026-06-25",
+            "active_status": true,
+            "allowed_for_training": true
+        },
+        "wick_rejection_ratio": {
+            "calculation_version": "v1",
+            "created_date": "2026-06-25",
+            "active_status": true,
+            "allowed_for_training": true
+        },
+        "consecutive_green_candles": {
+            "calculation_version": "v1",
+            "created_date": "2026-06-25",
+            "active_status": true,
+            "allowed_for_training": true
+        },
+        "consecutive_red_candles": {
+            "calculation_version": "v1",
+            "created_date": "2026-06-25",
+            "active_status": true,
+            "allowed_for_training": true
+        },
+        "minutes_from_open": {
+            "calculation_version": "v1",
+            "created_date": "2026-06-25",
+            "active_status": true,
+            "allowed_for_training": true
+        },
+        "market_session": {
+            "calculation_version": "v1",
+            "created_date": "2026-06-25",
+            "active_status": true,
+            "allowed_for_training": true
+        },
+        "is_expiry_day": {
+            "calculation_version": "v1",
+            "created_date": "2026-06-25",
+            "active_status": true,
+            "allowed_for_training": true
+        },
+        "theta_pressure_zone": {
+            "calculation_version": "v1",
+            "created_date": "2026-06-25",
+            "active_status": true,
+            "allowed_for_training": true
+        }
+    }
+}

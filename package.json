@@ -9,6 +9,7 @@
   "author": "Amarjeet Singh",
   "license": "ISC",
   "dependencies": {
-    "electron": "^31.0.0"
+    "electron": "^31.0.0",
+    "pm2": "^7.0.1"
   }
 }

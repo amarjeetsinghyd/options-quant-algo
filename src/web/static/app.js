@@ -1,5 +1,15 @@
 // Initialization
 document.addEventListener('DOMContentLoaded', () => {
+    // Dynamic replacement of cached HTML emoji without requiring python server restart
+    document.querySelectorAll('.btn').forEach(btn => {
+        if (btn.innerHTML.includes('📊')) {
+            btn.innerHTML = '<ion-icon name="flask-outline" style="font-size: 1.1em;"></ion-icon> Intelligence Lab';
+            btn.style.display = 'flex';
+            btn.style.alignItems = 'center';
+            btn.style.gap = '6px';
+        }
+    });
+
     initTheme();
     fetchTelemetry();
     setInterval(fetchTelemetry, 3000);
@@ -7,6 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 let previousActiveTrade = null;
 let previousHistoryCount = 0;
+let currentLiveLtp = null;
 
 // THEME MANAGEMENT
 function initTheme() {
@@ -21,6 +32,9 @@ function toggleTheme() {
     document.documentElement.setAttribute('data-theme', target);
     localStorage.setItem('theme', target);
     updateThemeIcon(target);
+    if (isChartInitialized) {
+        applyChartTheme(target);
+    }
 }
 
 function updateThemeIcon(theme) {
@@ -121,22 +135,72 @@ async function fetchTelemetry() {
 }
 
 function updateUI(data) {
-    if (data.status === 'running') {
-        document.getElementById('status-dot').className = 'dot dot-online';
-        document.getElementById('status-text').innerText = 'ONLINE';
+    const sysTop = document.getElementById('sys-mode-top');
+    const sysBot = document.getElementById('sys-mode-bottom');
+    const sysBadge = document.getElementById('system-mode-indicator');
+
+    if (data.status === 'initializing') {
+        sysTop.innerText = "INITIALIZING MODE";
+        sysBot.innerText = "CONNECTING...";
+        sysBot.style.color = "var(--accent)";
+        sysBadge.style.border = "1px solid var(--accent)";
         document.getElementById('btn-start').style.display = 'none';
         document.getElementById('btn-stop').style.display = 'flex';
-    } else {
-        document.getElementById('status-dot').className = 'dot dot-offline';
-        document.getElementById('status-text').innerText = 'STOPPED';
+    } else if (data.status === 'running') {
+        sysTop.innerText = "PAPER MODE";
+        sysBot.innerText = "DATA LIVE";
+        sysBot.style.color = "var(--success)";
+        sysBadge.style.border = "1px solid var(--success)";
+        document.getElementById('btn-start').style.display = 'none';
+        document.getElementById('btn-stop').style.display = 'flex';
+    } else if (data.status === 'error') {
+        sysTop.innerText = "ERROR MODE";
+        sysBot.innerText = "API/WS DISCONNECTED";
+        sysBot.style.color = "var(--danger)";
+        sysBadge.style.border = "1px solid var(--danger)";
         document.getElementById('btn-start').style.display = 'flex';
         document.getElementById('btn-stop').style.display = 'none';
+        
+        // Show error message if not shown in banner
+        if (data.error_msg) {
+            if(!data.errors) data.errors = [];
+            if(!data.errors.includes(data.error_msg)) {
+                data.errors.unshift(`[${data.error_time}] ${data.error_msg}`);
+            }
+        }
+    } else {
+        sysTop.innerText = "RESEARCH MODE";
+        sysBot.innerText = "API OFF";
+        sysBot.style.color = "var(--primary)";
+        sysBadge.style.border = "1px solid var(--border)";
+        document.getElementById('btn-start').style.display = 'flex';
+        document.getElementById('btn-stop').style.display = 'none';
+    }
+
+    // Render Error Banner
+    const errorBanner = document.getElementById('error-banner');
+    const errorList = document.getElementById('error-list');
+    if (data.errors && data.errors.length > 0) {
+        errorBanner.style.display = 'block';
+        errorList.innerHTML = '';
+        data.errors.forEach(err => {
+            let li = document.createElement('li');
+            li.innerText = err;
+            errorList.appendChild(li);
+        });
+    } else {
+        errorBanner.style.display = 'none';
     }
 
     if (data.telemetry) {
         document.getElementById('val-symbol').innerText = data.telemetry.symbol || '--';
         let ltpElem = document.getElementById('val-ltp');
-        ltpElem.innerText = data.telemetry.ltp ? data.telemetry.ltp.toFixed(2) : '--';
+        if (data.telemetry.ltp) {
+            currentLiveLtp = data.telemetry.ltp;
+            ltpElem.innerText = currentLiveLtp.toFixed(2);
+        } else {
+            ltpElem.innerText = '--';
+        }
         
         if (data.telemetry.ltp_time) {
             document.getElementById('ltp-time').innerText = `(${data.telemetry.ltp_time})`;
@@ -153,6 +217,19 @@ function updateUI(data) {
         }
         
         document.getElementById('val-vwap').innerText = data.telemetry.vwap ? data.telemetry.vwap.toFixed(2) : '--';
+        
+        let emaElem = document.getElementById('val-ema');
+        let vwapVal = data.telemetry.vwap || 0;
+        if (data.telemetry.ema) {
+            let emaVal = data.telemetry.ema;
+            emaElem.innerText = emaVal.toFixed(2);
+            if (emaVal > vwapVal) emaElem.className = 'value text-green';
+            else if (emaVal < vwapVal) emaElem.className = 'value text-red';
+            else emaElem.className = 'value';
+        } else {
+            emaElem.innerText = '--';
+            emaElem.className = 'value';
+        }
         
         const vfi = data.telemetry.vfi !== undefined ? data.telemetry.vfi.toFixed(2) : '--';
         const vfiEma = data.telemetry.vfi_ema !== undefined ? data.telemetry.vfi_ema.toFixed(2) : '--';
@@ -171,6 +248,20 @@ function updateUI(data) {
         
         if (data.telemetry.volume_time) {
             document.getElementById('volume-time').innerText = `(${data.telemetry.volume_time})`;
+        }
+        
+        // Push live update to chart if initialized
+        if (isChartInitialized && data.telemetry.ltp && candleSeries) {
+            const t = Math.floor(Date.now() / 1000);
+            
+            // Note: In a production app, we would align this to the exact 1-min boundary 
+            // and update the last candle. For simplicity, we just trigger a data refresh or append a live tick.
+            // Since LightweightCharts needs standard time intervals, we'll re-fetch the small df or just update the last candle
+            // However, to avoid complexity, we can just fetchChartData() every 60 seconds or so.
+            // Let's just update the last candle's close if we have the current minute
+            const lastCandleTime = (Math.floor(t / 60) * 60) + 19800; // rough IST alignment
+            
+            // To be precise with TradingView, it's safer to just let the backend feed the data on reload
         }
     }
 
@@ -324,13 +415,458 @@ setInterval(() => {
     if (!bar) return;
     const now = new Date();
     const exactSeconds = now.getSeconds() + (now.getMilliseconds() / 1000);
-    const pct = (exactSeconds / 60) * 100;
-    
-    if (exactSeconds < 0.1 || pct < parseFloat(bar.style.width || "0")) {
-        bar.style.transition = 'none';
-        bar.style.width = '0%';
-    } else {
-        bar.style.transition = 'width 0.1s linear';
-        bar.style.width = pct + '%';
-    }
+    const progress = (exactSeconds / 60) * 100;
+    bar.style.width = `${progress}%`;
 }, 100);
+
+// Candle Timer Overlay
+setInterval(() => {
+    const timerDiv = document.getElementById('candle-timer');
+    if (!timerDiv || !chart || !candleSeries || !currentLiveLtp) return;
+    
+    // Check if the timer should be visible
+    const sysModeBot = document.getElementById('sys-mode-bottom');
+    const isOnline = sysModeBot && sysModeBot.innerText === 'DATA LIVE';
+    
+    if (!isOnline) {
+        timerDiv.style.display = 'none';
+        return;
+    }
+
+    const now = new Date();
+    const secondsRemaining = 60 - now.getSeconds();
+    timerDiv.innerText = `00:${secondsRemaining.toString().padStart(2, '0')}`;
+    
+    const yCoord = candleSeries.priceToCoordinate(currentLiveLtp);
+    if (yCoord !== null) {
+        timerDiv.style.display = 'block';
+        timerDiv.style.top = `${yCoord + 12}px`;
+    } else {
+        timerDiv.style.display = 'none';
+    }
+}, 1000);
+
+// --- CHART INTEGRATION ---
+let chart;
+let candleSeries;
+let volumeSeries;
+let vwapSeries;
+let emaSeries;
+let vfiChart;
+let vfiSeries;
+let vfiEmaSeries;
+let vfiZeroLine;
+let isChartInitialized = false;
+let isFirstLoad = true;
+let chartDataCache = [];
+let isSyncing = false;
+
+function initChart() {
+    const chartContainer = document.getElementById('tv-chart');
+    const vfiContainer = document.getElementById('vfi-chart');
+    if (!chartContainer) return;
+    
+    // --- MAIN CHART ---
+    const savedTheme = localStorage.getItem('theme') || 'dark';
+    const isDark = savedTheme === 'dark';
+    const bgColor = isDark ? '#1e293b' : '#ffffff';
+    const txtColor = isDark ? '#d1d5db' : '#334155';
+    const gridColor = isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)';
+    const borderColor = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
+
+    chart = LightweightCharts.createChart(chartContainer, {
+        layout: {
+            background: { type: 'solid', color: bgColor },
+            textColor: txtColor,
+        },
+        grid: {
+            vertLines: { color: gridColor },
+            horzLines: { color: gridColor },
+        },
+        crosshair: {
+            mode: LightweightCharts.CrosshairMode.Normal,
+        },
+        rightPriceScale: {
+            borderColor: borderColor,
+            minimumWidth: 70,
+            scaleMargins: {
+                top: 0.1,
+                bottom: 0.2, // Give the price 80% height, keeping a 5% buffer from volume
+            },
+        },
+        timeScale: {
+            borderColor: borderColor,
+            timeVisible: true,
+            secondsVisible: false,
+        },
+        handleScroll: true,
+        handleScale: true,
+    });
+
+    candleSeries = chart.addCandlestickSeries({
+        upColor: '#059669',
+        downColor: '#dc2626',
+        borderDownColor: '#dc2626',
+        borderUpColor: '#059669',
+        wickDownColor: '#dc2626',
+        wickUpColor: '#059669',
+    });
+
+    volumeSeries = chart.addHistogramSeries({
+        color: '#6366f1',
+        priceFormat: { type: 'volume' },
+        priceScaleId: '', 
+        priceLineVisible: false,
+    });
+    
+    volumeSeries.priceScale().applyOptions({
+        scaleMargins: { top: 0.85, bottom: 0 }
+    });
+
+    vwapSeries = chart.addLineSeries({
+        color: '#3b82f6',
+        lineWidth: 2,
+        title: 'VWAP',
+        crosshairMarkerVisible: false,
+        priceLineVisible: false,
+    });
+
+    emaSeries = chart.addLineSeries({
+        color: '#f59e0b',
+        lineWidth: 2,
+        title: '9 EMA',
+        crosshairMarkerVisible: false,
+        priceLineVisible: false,
+    });
+
+    // --- CROSSHAIR LEGEND ---
+    function updateLegend(data) {
+        const set = (id, val) => { const el = document.getElementById(id); if (el) el.innerText = val; };
+        const fmt = (n) => n !== undefined && n !== null ? Number(n).toFixed(2) : '--';
+        const fmtVol = (v) => v >= 1000000 ? (v/1000000).toFixed(2)+'M' : v >= 1000 ? (v/1000).toFixed(1)+'K' : (v||0).toString();
+
+        set('legend-o', fmt(data.open));
+        set('legend-h', fmt(data.high));
+        set('legend-l', fmt(data.low));
+        set('legend-c', fmt(data.close));
+        set('legend-v', fmtVol(data.value));
+        set('legend-vwap', fmt(data.vwap));
+        set('legend-ema', fmt(data.ema_9));
+        set('legend-vfi', fmt(data.vfi));
+        set('legend-vfi-ema', fmt(data.vfi_ema));
+
+        const legendC = document.getElementById('legend-c');
+        if (legendC && data.close !== undefined && data.open !== undefined) {
+            legendC.style.color = data.close >= data.open ? '#059669' : '#dc2626';
+        }
+        const legendVwap = document.getElementById('legend-vwap');
+        if (legendVwap) legendVwap.style.color = '#3b82f6';
+        const legendEma = document.getElementById('legend-ema');
+        if (legendEma) legendEma.style.color = '#f59e0b';
+        const legendVfiEma = document.getElementById('legend-vfi-ema');
+        if (legendVfiEma) legendVfiEma.style.color = '#ef4444';
+        const legendVfi = document.getElementById('legend-vfi');
+        if (legendVfi && data.vfi !== undefined) {
+            legendVfi.style.color = data.vfi > 0 ? '#10b981' : '#ef4444';
+        }
+    }
+
+    // --- CROSSHAIR SYNC ---
+    let isCrosshairSyncing = false;
+
+    chart.subscribeCrosshairMove(param => {
+        if (!chartDataCache.length) return;
+        if (!param || !param.time) {
+            updateLegend(chartDataCache[chartDataCache.length - 1]);
+            if (!isCrosshairSyncing && vfiChart) {
+                isCrosshairSyncing = true;
+                vfiChart.clearCrosshairPosition();
+                isCrosshairSyncing = false;
+            }
+            return;
+        }
+
+        const match = chartDataCache.find(d => d.time === param.time);
+        if (match) updateLegend(match);
+
+        if (!isCrosshairSyncing && vfiChart && vfiSeries) {
+            isCrosshairSyncing = true;
+            // Sync crosshair on VFI chart. We just use 0 as price to show the vertical line.
+            vfiChart.setCrosshairPosition(0, param.time, vfiSeries);
+            isCrosshairSyncing = false;
+        }
+    });
+
+    // --- VFI SUB-CHART ---
+    if (vfiContainer) {
+        vfiChart = LightweightCharts.createChart(vfiContainer, {
+            layout: {
+                background: { type: 'solid', color: bgColor },
+                textColor: txtColor,
+            },
+            grid: {
+                vertLines: { color: gridColor },
+                horzLines: { color: gridColor },
+            },
+            crosshair: {
+                mode: LightweightCharts.CrosshairMode.Normal,
+            },
+            rightPriceScale: {
+                borderColor: borderColor,
+                minimumWidth: 70,
+            },
+            timeScale: {
+                borderColor: borderColor,
+                timeVisible: true,
+                secondsVisible: false,
+                visible: false, // Hide time axis on VFI (main chart shows it)
+            },
+            handleScroll: true,
+            handleScale: true,
+        });
+
+        // VFI Raw line (green)
+        vfiSeries = vfiChart.addLineSeries({
+            color: '#10b981',
+            lineWidth: 2,
+            title: 'VFI',
+            crosshairMarkerVisible: false,
+            priceLineVisible: false,
+        });
+
+        // VFI EMA line (orange/red)
+        vfiEmaSeries = vfiChart.addLineSeries({
+            color: '#ef4444',
+            lineWidth: 1,
+            lineStyle: 0,
+            title: 'VFI EMA',
+            crosshairMarkerVisible: false,
+            priceLineVisible: false,
+        });
+
+        // Zero line (dashed)
+        vfiZeroLine = vfiChart.addLineSeries({
+            color: '#64748b',
+            lineWidth: 1,
+            lineStyle: 2, // Dashed
+            title: '',
+            crosshairMarkerVisible: false,
+            lastValueVisible: false,
+            priceLineVisible: false,
+        });
+
+        // --- SYNC TIME SCALES ---
+        chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+            if (isSyncing || !range) return;
+            isSyncing = true;
+            vfiChart.timeScale().setVisibleLogicalRange(range);
+            isSyncing = false;
+        });
+        vfiChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+            if (isSyncing || !range) return;
+            isSyncing = true;
+            chart.timeScale().setVisibleLogicalRange(range);
+            isSyncing = false;
+        });
+
+        // Sync crosshair back from VFI to Main Chart
+        vfiChart.subscribeCrosshairMove(param => {
+            if (!chartDataCache.length) return;
+            if (!param || !param.time) {
+                updateLegend(chartDataCache[chartDataCache.length - 1]);
+                if (!isCrosshairSyncing && chart) {
+                    isCrosshairSyncing = true;
+                    chart.clearCrosshairPosition();
+                    isCrosshairSyncing = false;
+                }
+                return;
+            }
+
+            const match = chartDataCache.find(d => d.time === param.time);
+            if (match) updateLegend(match);
+
+            if (!isCrosshairSyncing && chart && candleSeries) {
+                isCrosshairSyncing = true;
+                // Use close price to roughly center the horizontal crosshair on main chart
+                const price = match ? match.close : 0;
+                chart.setCrosshairPosition(price, param.time, candleSeries);
+                isCrosshairSyncing = false;
+            }
+        });
+    }
+
+    isChartInitialized = true;
+    fetchChartData();
+}
+
+async function fetchChartData() {
+    if (!isChartInitialized) return;
+    const IST_OFFSET = 19800; // 5 hours 30 minutes in seconds
+    try {
+        const response = await fetch('/api/chart_data');
+        const data = await response.json();
+        
+        if (data && data.length > 0) {
+            // Add IST offset so chart displays Indian Standard Time
+            data.forEach(d => { d.time = d.time + IST_OFFSET; });
+            chartDataCache = data;
+            
+            const candles = data.map(d => ({time: d.time, open: d.open, high: d.high, low: d.low, close: d.close}));
+            const volumes = data.map(d => ({time: d.time, value: d.value, color: d.close >= d.open ? '#05966988' : '#dc262688'}));
+            
+            candleSeries.setData(candles);
+            volumeSeries.setData(volumes);
+            
+            if (data[0].vwap !== undefined) {
+                vwapSeries.setData(data.filter(d => d.vwap).map(d => ({time: d.time, value: d.vwap})));
+            }
+            if (data[0].ema_9 !== undefined) {
+                emaSeries.setData(data.filter(d => d.ema_9).map(d => ({time: d.time, value: d.ema_9})));
+            }
+
+            // --- VFI DATA ---
+            if (vfiChart && data[0].vfi !== undefined) {
+                const vfiData = data.filter(d => d.vfi !== 0).map(d => ({time: d.time, value: d.vfi}));
+                if (vfiData.length > 0) {
+                    vfiSeries.setData(vfiData);
+                }
+                
+                if (data[0].vfi_ema !== undefined) {
+                    const vfiEmaData = data.filter(d => d.vfi_ema !== 0).map(d => ({time: d.time, value: d.vfi_ema}));
+                    if (vfiEmaData.length > 0) {
+                        vfiEmaSeries.setData(vfiEmaData);
+                    }
+                }
+
+                // Dashed zero line spanning the full data range
+                const zeroData = data.map(d => ({time: d.time, value: 0}));
+                vfiZeroLine.setData(zeroData);
+            }
+            
+            // Only auto-fit on first load, after that preserve user's zoom/scroll position
+            if (isFirstLoad) {
+                chartShowToday();
+                isFirstLoad = false;
+            }
+        }
+    } catch (e) {
+        console.error("Failed to fetch chart data", e);
+    }
+}
+
+// --- CHART TOOLBAR FUNCTIONS ---
+function chartZoomIn() {
+    if (!chart) return;
+    const timeScale = chart.timeScale();
+    const range = timeScale.getVisibleLogicalRange();
+    if (range) {
+        const mid = (range.from + range.to) / 2;
+        const halfRange = (range.to - range.from) / 4; // Zoom in by 50%
+        timeScale.setVisibleLogicalRange({ from: mid - halfRange, to: mid + halfRange });
+    }
+}
+
+function chartZoomOut() {
+    if (!chart) return;
+    const timeScale = chart.timeScale();
+    const range = timeScale.getVisibleLogicalRange();
+    if (range) {
+        const mid = (range.from + range.to) / 2;
+        const halfRange = (range.to - range.from); // Zoom out by 100%
+        timeScale.setVisibleLogicalRange({ from: mid - halfRange, to: mid + halfRange });
+    }
+}
+
+function chartScrollLeft() {
+    if (!chart) return;
+    const timeScale = chart.timeScale();
+    const range = timeScale.getVisibleLogicalRange();
+    if (range) {
+        const shift = (range.to - range.from) * 0.2; // Shift by 20%
+        timeScale.setVisibleLogicalRange({ from: range.from - shift, to: range.to - shift });
+    }
+}
+
+function chartScrollRight() {
+    if (!chart) return;
+    const timeScale = chart.timeScale();
+    const range = timeScale.getVisibleLogicalRange();
+    if (range) {
+        const shift = (range.to - range.from) * 0.2; // Shift by 20%
+        timeScale.setVisibleLogicalRange({ from: range.from + shift, to: range.to + shift });
+    }
+}
+
+function chartResetZoom() {
+    if (!chart) return;
+    chart.timeScale().fitContent();
+}
+
+function chartShowToday() {
+    if (!chart || !chartDataCache.length) return;
+    // Since we already added IST offset, chart times look like IST
+    // Find today's 9:00 AM IST as a fake-UTC timestamp
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 9, 0, 0);
+    const todayStartEpoch = Math.floor(todayStart.getTime() / 1000);
+    
+    // Find the index of the first candle today
+    const todayIdx = chartDataCache.findIndex(d => d.time >= todayStartEpoch);
+    if (todayIdx >= 0) {
+        const totalBars = chartDataCache.length;
+        chart.timeScale().setVisibleLogicalRange({
+            from: todayIdx - 2,
+            to: totalBars + 5
+        });
+    } else {
+        // If no today data found, just fit all
+        chart.timeScale().fitContent();
+    }
+}
+
+function chartRefresh() {
+    isFirstLoad = true;
+    fetchChartData();
+}
+
+// Initialize chart immediately on DOM load (no delay)
+document.addEventListener('DOMContentLoaded', () => {
+    initChart();
+});
+
+// Refresh chart data every 15 seconds (without re-fitting)
+setInterval(() => {
+    const sysModeBot = document.getElementById('sys-mode-bottom');
+    const isOnline = sysModeBot && sysModeBot.innerText === 'DATA LIVE';
+    if (isChartInitialized && isOnline) {
+        fetchChartData();
+    }
+}, 15000);
+
+// --- CHART THEME TOGGLE ---
+function applyChartTheme(theme) {
+    if (!chart) return;
+    const isDark = theme === 'dark';
+    const bgColor = isDark ? '#1e293b' : '#ffffff';
+    const txtColor = isDark ? '#d1d5db' : '#334155';
+    const gridColor = isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)';
+    const borderColor = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
+
+    const chartOptions = {
+        layout: {
+            background: { type: 'solid', color: bgColor },
+            textColor: txtColor,
+        },
+        grid: {
+            vertLines: { color: gridColor },
+            horzLines: { color: gridColor },
+        },
+        rightPriceScale: { borderColor: borderColor, minimumWidth: 70 },
+        timeScale: { borderColor: borderColor },
+    };
+
+    chart.applyOptions(chartOptions);
+    if (vfiChart) {
+        vfiChart.applyOptions(chartOptions);
+    }
+}

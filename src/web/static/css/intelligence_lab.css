@@ -1,0 +1,17 @@
+
+.lab-container { padding: 20px; color: #e1e1e1; font-family: 'Inter', sans-serif; }
+.lab-section { background: rgba(20,20,25,0.7); border: 1px solid #333; border-radius: 8px; padding: 20px; margin-bottom: 20px; backdrop-filter: blur(10px); }
+.highlight-section { border-color: #00d2ff; background: rgba(0, 210, 255, 0.05); }
+.dashboard-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(45%, 1fr)); gap: 20px; }
+.metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; }
+.metrics-grid.col-2 { grid-template-columns: 1fr 1fr; }
+.metric-card { background: rgba(0,0,0,0.3); padding: 15px; border-radius: 6px; border: 1px solid #222; text-align: center; }
+.metric-card h3 { font-size: 0.85rem; color: #888; margin: 0 0 10px 0; font-weight: normal; }
+.metric-card .val { font-size: 1.5rem; color: #fff; font-weight: 600; font-family: 'Outfit', sans-serif; }
+.insight-list { list-style: none; padding: 0; margin: 0; }
+.insight-list li { margin-bottom: 10px; padding: 10px; background: rgba(0,0,0,0.2); border-left: 3px solid #00d2ff; }
+.table-responsive { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+th, td { padding: 10px; text-align: left; border-bottom: 1px solid #333; }
+th { color: #888; font-weight: 600; font-size: 0.85rem; }
+td { font-size: 0.95rem; }

@@ -6,3 +6,8 @@ pandas
 python-dotenv
 google-generativeai
 flask
+scikit-learn
+xgboost
+lightgbm
+catboost
+shap

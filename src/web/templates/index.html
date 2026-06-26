@@ -4,11 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Quant Algorithmic Terminal</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=5">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=1.1">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Inter:wght@400;600&display=swap" rel="stylesheet">
     <!-- Ionicons for modern icons -->
     <script type="module" src="https://unpkg.com/ionicons@7.1.0/dist/ionicons/ionicons.esm.js"></script>
     <script nomodule src="https://unpkg.com/ionicons@7.1.0/dist/ionicons/ionicons.js"></script>
+    
+    <!-- Lightweight Charts (Local file - works in Electron without CSP issues) -->
+    <script src="{{ url_for('static', filename='lightweight-charts.min.js') }}"></script>
 </head>
 <body>
     <div class="app-wrapper">
@@ -18,13 +21,20 @@
                 <h1>Quant <span>Terminal</span></h1>
             </div>
             <div class="nav-controls">
+                <button class="btn" onclick="window.location.href='/intelligence_lab'" title="Open Intelligence Lab" style="margin-right: 15px; display: flex; align-items: center; gap: 6px;">
+                    <ion-icon name="flask-outline" style="font-size: 1.1em;"></ion-icon> Intelligence Lab
+                </button>
                 <button id="theme-toggle" class="icon-btn" onclick="toggleTheme()" title="Toggle Light/Dark Theme">
                     <ion-icon name="moon-outline" id="theme-icon"></ion-icon>
                 </button>
                 <button id="settings-btn" class="icon-btn" onclick="openSettings()" title="API Settings">
                     <ion-icon name="settings-outline"></ion-icon>
                 </button>
-                <div class="status-indicator">
+                <div class="system-mode-indicator" id="system-mode-indicator" style="display:flex; flex-direction:column; align-items:center; margin-right: 15px; padding: 5px 15px; border-radius: 6px; background: rgba(0,0,0,0.2); border: 1px solid var(--border);">
+                    <div style="font-size: 11px; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 1px;" id="sys-mode-top">RESEARCH MODE</div>
+                    <div style="font-size: 13px; font-weight: 800; color: var(--primary);" id="sys-mode-bottom">API OFF</div>
+                </div>
+                <div class="status-indicator" style="display: none;">
                     <span id="status-dot" class="dot dot-offline"></span>
                     <span id="status-text">OFFLINE</span>
                 </div>
@@ -38,6 +48,15 @@
         </nav>
 
         <main class="container">
+            <!-- Live Error Banner -->
+            <div id="error-banner" class="error-banner" style="display: none;">
+                <div class="error-header">
+                    <ion-icon name="warning"></ion-icon>
+                    <strong>System Alerts</strong>
+                </div>
+                <ul id="error-list"></ul>
+            </div>
+            
             <div class="grid-telemetry">
                 <div class="card card-anchor glass-panel">
                     <h3>Anchor Symbol</h3>
@@ -47,12 +66,18 @@
                     <h3>LTP <span id="ltp-time" class="time-sub"></span></h3>
                     <div class="value" id="val-ltp">--</div>
                 </div>
-                <div class="card glass-panel">
-                    <h3>Volume <span id="volume-time" class="time-sub"></span></h3>
-                    <div class="value" id="val-volume">--</div>
-                    <div class="progress-track">
-                        <div id="volume-bar" class="progress-fill"></div>
+                <div class="card glass-panel flex-row">
+                    <div class="card-col">
+                        <h3>Volume <span id="volume-time" class="time-sub"></span></h3>
+                        <div class="value" id="val-volume">--</div>
                     </div>
+                    <div class="volume-bar-vertical-track">
+                        <div id="volume-bar" class="volume-bar-vertical-fill"></div>
+                    </div>
+                </div>
+                <div class="card glass-panel">
+                    <h3>9 EMA</h3>
+                    <div class="value" id="val-ema">--</div>
                 </div>
                 <div class="card glass-panel">
                     <h3>VWAP</h3>
@@ -61,6 +86,55 @@
                 <div class="card glass-panel">
                     <div class="card-label">VFI (RAW / EMA)</div>
                     <div class="card-value value" id="val-vfi">--</div>
+                </div>
+            </div>
+            
+            <div class="chart-panel glass-panel">
+                <div class="chart-header-row">
+                    <div class="trade-header">
+                        <ion-icon name="analytics-outline" class="alert-icon"></ion-icon>
+                        <h2>LIVE CHART</h2>
+                    </div>
+
+                </div>
+                <div class="chart-wrapper">
+                    <div id="chart-legend" class="chart-legend">
+                        <span class="legend-symbol">SENSEX</span>
+                        <span>O: <span id="legend-o">--</span></span>
+                        <span>H: <span id="legend-h">--</span></span>
+                        <span>L: <span id="legend-l">--</span></span>
+                        <span>C: <span id="legend-c">--</span></span>
+                        <span>Vol: <span id="legend-v">--</span></span>
+                        <span class="legend-divider">|</span>
+                        <span class="legend-vwap">VWAP: <span id="legend-vwap">--</span></span>
+                        <span class="legend-ema">EMA9: <span id="legend-ema">--</span></span>
+                    </div>
+                    <div id="tv-chart" class="tv-chart-container"></div>
+                    <div class="chart-toolbar-floating" id="chart-toolbar">
+                        <button class="floating-btn" onclick="chartZoomOut()" title="Zoom Out">
+                            <ion-icon name="remove-outline"></ion-icon>
+                        </button>
+                        <button class="floating-btn" onclick="chartZoomIn()" title="Zoom In">
+                            <ion-icon name="add-outline"></ion-icon>
+                        </button>
+                        <button class="floating-btn" onclick="chartScrollLeft()" title="Scroll Left">
+                            <ion-icon name="chevron-back-outline"></ion-icon>
+                        </button>
+                        <button class="floating-btn" onclick="chartScrollRight()" title="Scroll Right">
+                            <ion-icon name="chevron-forward-outline"></ion-icon>
+                        </button>
+                        <button class="floating-btn" onclick="chartResetZoom()" title="Reset Scale">
+                            <ion-icon name="refresh-outline"></ion-icon>
+                        </button>
+                    </div>
+                    <div id="candle-timer" class="candle-timer" style="display: none;">00:00</div>
+                </div>
+                <div class="chart-wrapper">
+                    <div id="vfi-legend" class="chart-legend">
+                        <span class="legend-vfi">VFI: <span id="legend-vfi">--</span></span>
+                        <span class="legend-ema">EMA: <span id="legend-vfi-ema">--</span></span>
+                    </div>
+                    <div id="vfi-chart" class="vfi-chart-container"></div>
                 </div>
             </div>
 
@@ -213,6 +287,6 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=6"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=17"></script>
 </body>
 </html>
