@@ -15,3 +15,40 @@ DUCKDB_PATH = os.path.join(DATA_DIR, "ml_analytics.duckdb")
 # Performance & Profiling Instrumentation
 PROFILING_ENABLED = False
 SYSTEM_METRICS_INTERVAL = 5  # seconds
+
+# ─── SERVICE FEATURE FLAGS (per DOC-1.2 ASD v1) ─────────────────────────────────
+# DO NOT change without updating DOC-1.2 version
+
+# Core services
+ENABLE_TRADING_BOT = True
+ENABLE_RESEARCH_COLLECTOR = True
+ENABLE_ZMQ_BUS = True
+ENABLE_WEB_DASHBOARD = True
+
+# Shadow ML predictor — DISABLED until Version 2
+ENABLE_SHADOW_SERVICE = False
+
+# ML engine flags
+ENABLE_XGBOOST_SCORER = True
+ENABLE_ENSEMBLE_ENGINE = False  # lightgbm/catboost removed
+ENABLE_LSTM = False              # reserved for Version 2
+ENABLE_RL_OPTIMIZER = False      # reserved for Version 2
+
+# Data layer
+ENABLE_PARQUET_JOURNAL = True
+ENABLE_DUCKDB = False           # duckdb removed from deps
+
+# Resource limits
+MAX_RAM_MB = 400
+LOG_RETENTION_DAYS = 7
+PARQUET_WRITE_INTERVAL_SECONDS = 60
+
+# Parquet storage path
+PARQUET_DIR = os.path.join(DATA_DIR, "research_journal")
+
+# ─── FUTURE INTEGRATION FLAGS (NOT THIS PHASE) ───────────────────────────
+# Must remain False until Version 2 is explicitly approved
+ENABLE_LIVE_BROKERAGE_EXECUTION = False
+ENABLE_INSTITUTIONAL_REPORTS = False
+ENABLE_MULTI_INSTRUMENT = False
+ENABLE_AUTO_STRATEGY_DISCOVERY = False
