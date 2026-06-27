@@ -6,19 +6,19 @@ import time
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 from src.core.session_manager import SessionManager
-from src.core.research_collector import ResearchCollector
+from src.core.canonical_collector import CanonicalCollector
 from src.utils.logger import get_logger
 
 logger = get_logger("research_service")
 
 def main():
-    logger.info("=== STARTING RESEARCH COLLECTOR SERVICE ===")
+    logger.info("=== STARTING INSTITUTIONAL CANONICAL COLLECTOR SERVICE v3.1 ===")
     
     # Initialize session manager to handle Angel One auth
     session_manager = SessionManager()
     
     # Start the background collector
-    collector = ResearchCollector(session_manager=session_manager, poll_interval_seconds=60)
+    collector = CanonicalCollector(session_manager=session_manager, poll_interval_seconds=60)
     collector.start()
     
     try:
