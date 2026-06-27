@@ -26,8 +26,28 @@ class FeedService:
             
         self.fetcher = DataFetcher(self.api)
         self.anchor_token, self.anchor_symbol, self.anchor_exch = self.fetcher.get_cash_index_token()
+        
+        self.eq_exch_type = 1 if self.anchor_exch == "NSE" else 3
+        self.deriv_exch_type = 2 if self.anchor_exch == "NSE" else 4
+        
+        self.eq_tokens = [self.anchor_token]
+        self.deriv_tokens = []
+        
+        # 1. Futures
+        fut_token, _, _ = self.fetcher.get_current_futures_token()
+        if fut_token:
+            self.deriv_tokens.append(fut_token)
+            
+        # 2. Constituents
         active_tokens = self.fetcher.get_active_constituents()
-        self.token_list = list(active_tokens.values())
+        self.eq_tokens.extend(list(active_tokens.values()))
+        
+        # 3. Option Chain
+        opt_df = self.fetcher.get_weekly_option_tokens()
+        if not opt_df.empty:
+            self.deriv_tokens.extend(opt_df['token'].tolist())
+            
+        logger.info(f"[FeedService] Built token lists: {len(self.eq_tokens)} Equities, {len(self.deriv_tokens)} Derivatives.")
         
         feed_token = session_data.get("feedToken")
         jwt_token = session_data.get("jwtToken")
@@ -49,9 +69,15 @@ class FeedService:
         logger.info("[FeedService] WS Connected. Subscribing to base tokens...")
         self.reconnect_attempts = 0
         try:
-            full_list = self.token_list + [self.anchor_token]
-            ws_exch_type = 1 if self.anchor_exch == "NSE" else 3
-            self.ws.subscribe("base_sub", 3, [{"exchangeType": ws_exch_type, "tokens": full_list}])
+            reqs = []
+            if self.eq_tokens:
+                reqs.append({"exchangeType": self.eq_exch_type, "tokens": self.eq_tokens})
+            if self.deriv_tokens:
+                reqs.append({"exchangeType": self.deriv_exch_type, "tokens": self.deriv_tokens})
+            
+            if reqs:
+                self.ws.subscribe("mega_sub", 3, reqs)
+                logger.info(f"[FeedService] Subscribed to {sum(len(r['tokens']) for r in reqs)} tokens across {len(reqs)} exchanges.")
         except Exception as e:
             logger.error(f"[FeedService] Initial subscribe error: {e}")
 
