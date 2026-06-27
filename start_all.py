@@ -27,13 +27,28 @@ logger = get_logger("start_all")
 # ── Service definitions ───────────────────────────────────────────────────
 SERVICES = [
     {
-        "name": "research_collector",
-        "command": [sys.executable, "-m", "src.services.research_service"],
+        "name": "feed_service",
+        "command": [sys.executable, "src/services/feed_service.py"],
         "restart_on_failure": True,
     },
     {
-        "name": "trading_engine",
-        "command": [sys.executable, "-m", "src.main"],
+        "name": "brain_service",
+        "command": [sys.executable, "src/services/brain_service.py"],
+        "restart_on_failure": True,
+    },
+    {
+        "name": "shadow_service",
+        "command": [sys.executable, "src/services/shadow_service.py"],
+        "restart_on_failure": True,
+    },
+    {
+        "name": "research_collector",
+        "command": [sys.executable, "src/services/research_service.py"],
+        "restart_on_failure": True,
+    },
+    {
+        "name": "web_dashboard",
+        "command": [sys.executable, "main.py"],
         "restart_on_failure": True,
     },
 ]
