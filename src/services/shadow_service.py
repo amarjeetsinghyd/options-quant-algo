@@ -1,3 +1,15 @@
+# ─── SHADOW SERVICE — DISABLED per DOC-1.2 ASD v1 ───────────────────────────────────
+# Code preserved. Re-enable only when Version 2 is explicitly approved.
+# Toggle: src/config/engineering_config.py → ENABLE_SHADOW_SERVICE
+import sys as _sys
+try:
+    from src.config.engineering_config import ENABLE_SHADOW_SERVICE
+except ImportError:
+    ENABLE_SHADOW_SERVICE = False
+if not ENABLE_SHADOW_SERVICE:
+    print("[shadow_service] DISABLED via engineering_config.ENABLE_SHADOW_SERVICE — exiting.")
+    _sys.exit(0)
+
 import time
 import threading
 import sys
