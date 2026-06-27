@@ -2,12 +2,16 @@ import sqlite3
 import os
 from datetime import datetime
 
-ML_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "ml_research.db")
-STRIKE_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "strike_research.db")
+from src.utils.logger import get_logger
+logger = get_logger("nightly_validator")
+from src.utils.instrumentation import get_db_connection
+from src.config.engineering_config import ML_DB_PATH, STRIKE_DB_PATH
+
+
 REPORT_PATH = r"C:\Users\Amarjeet Singh\.gemini\antigravity\brain\05cb2f80-d049-4eb6-89ab-dc0decf22420\data_quality_report.md"
 
 def run_nightly_validation():
-    print("=== STARTING NIGHTLY DATA QUALITY AUDIT ===")
+    logger.info("=== STARTING NIGHTLY DATA QUALITY AUDIT ===")
     
     report_lines = [
         "# Data Quality & Integrity Audit Report",
@@ -22,7 +26,7 @@ def run_nightly_validation():
     # 1. Audit ml_research.db
     if os.path.exists(ML_DB_PATH):
         try:
-            conn = sqlite3.connect(ML_DB_PATH)
+            conn = get_db_connection(ML_DB_PATH)
             cursor = conn.cursor()
             
             # Gamma Events Audit
@@ -80,7 +84,7 @@ def run_nightly_validation():
     # 2. Audit strike_research.db
     if os.path.exists(STRIKE_DB_PATH):
         try:
-            conn = sqlite3.connect(STRIKE_DB_PATH)
+            conn = get_db_connection(STRIKE_DB_PATH)
             cursor = conn.cursor()
             
             # Snapshots
@@ -134,11 +138,11 @@ def run_nightly_validation():
         os.makedirs(os.path.dirname(REPORT_PATH), exist_ok=True)
         with open(REPORT_PATH, "w") as f:
             f.write("\n".join(report_lines))
-        print(f"Data Quality Report saved to: {REPORT_PATH}")
+        logger.info(f"Data Quality Report saved to: {REPORT_PATH}")
     except Exception as e:
-        print(f"Failed to write report file: {e}")
+        logger.info(f"Failed to write report file: {e}")
         
-    print("=== NIGHTLY AUDIT COMPLETED ===")
+    logger.info("=== NIGHTLY AUDIT COMPLETED ===")
 
 if __name__ == "__main__":
     run_nightly_validation()

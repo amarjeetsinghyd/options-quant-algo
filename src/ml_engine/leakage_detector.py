@@ -2,6 +2,10 @@ from datetime import datetime
 import json
 import os
 
+from src.utils.logger import get_logger
+logger = get_logger("leakage_detector")
+
+
 REGISTRY_PATH = os.path.join(os.path.dirname(__file__), "feature_registry.json")
 
 def load_whitelist():
@@ -11,7 +15,7 @@ def load_whitelist():
             # Return list of feature names where allowed_for_training is True
             return [name for name, details in features.items() if details.get("allowed_for_training", False)]
     except Exception as e:
-        print(f"[LeakageDetector] Error loading feature registry: {e}")
+        logger.error(f"[LeakageDetector] Error loading feature registry: {e}")
         return []
 
 class LeakageDetector:
@@ -36,7 +40,7 @@ class LeakageDetector:
                 raise ValueError(f"[LeakageDetector] CRITICAL: Feature timestamp ({feat_time}) is from the FUTURE relative to event ({evt_time}).")
         except ValueError as e:
             if "CRITICAL" in str(e): raise
-            print(f"[LeakageDetector] Warning: Timestamp parsing issue. {e}")
+            logger.warning(f"[LeakageDetector] Warning: Timestamp parsing issue. {e}")
             
         return True
 
@@ -55,6 +59,6 @@ class LeakageDetector:
         
         dropped = [col for col in df.columns if col not in safe_columns]
         if dropped:
-            print(f"[LeakageDetector] Dropped {len(dropped)} non-whitelisted columns: {dropped}")
+            logger.info(f"[LeakageDetector] Dropped {len(dropped)} non-whitelisted columns: {dropped}")
             
         return df[safe_columns]

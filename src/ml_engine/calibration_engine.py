@@ -1,5 +1,9 @@
 import numpy as np
 
+from src.utils.logger import get_logger
+logger = get_logger("calibration_engine")
+
+
 class ProbabilityCalibrationEngine:
     """
     ML output should represent real probability.
@@ -24,7 +28,7 @@ class ProbabilityCalibrationEngine:
             calibrated = calibrator.predict(np.array([[raw_probability]]))[0]
             return float(calibrated)
         except Exception as e:
-            print(f"[CalibrationEngine] Error during calibration for {key}: {e}")
+            logger.error(f"[CalibrationEngine] Error during calibration for {key}: {e}")
             return raw_probability
 
     def train_calibration(self, model_name, target_name, raw_predictions, true_labels, method='isotonic'):
@@ -41,13 +45,13 @@ class ProbabilityCalibrationEngine:
                 calibrator = IsotonicRegression(out_of_bounds='clip')
                 calibrator.fit(raw_predictions, true_labels)
                 self.calibration_maps[key] = calibrator
-                print(f"[CalibrationEngine] Trained Isotonic calibrator for {key}.")
+                logger.info(f"[CalibrationEngine] Trained Isotonic calibrator for {key}.")
             else:
                 # Platt Scaling (logistic regression wrapper)
                 from sklearn.linear_model import LogisticRegression
                 calibrator = LogisticRegression()
                 calibrator.fit(raw_predictions.reshape(-1, 1), true_labels)
                 self.calibration_maps[key] = calibrator
-                print(f"[CalibrationEngine] Trained Platt calibrator for {key}.")
+                logger.info(f"[CalibrationEngine] Trained Platt calibrator for {key}.")
         except Exception as e:
-            print(f"[CalibrationEngine] Failed training calibrator for {key}: {e}")
+            logger.info(f"[CalibrationEngine] Failed training calibrator for {key}: {e}")

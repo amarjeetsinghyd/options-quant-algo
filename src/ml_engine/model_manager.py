@@ -4,6 +4,10 @@ import pandas as pd
 import numpy as np
 from src.ml_engine.calibration_engine import ProbabilityCalibrationEngine
 
+from src.utils.logger import get_logger
+logger = get_logger("model_manager")
+
+
 MODELS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "models")
 
 class ModelManager:
@@ -33,7 +37,7 @@ class ModelManager:
                     with open(filepath, 'rb') as f:
                         self.models[name] = pickle.load(f)
                 except Exception as e:
-                    print(f"[ModelManager] Error loading {name}: {e}")
+                    logger.error(f"[ModelManager] Error loading {name}: {e}")
             else:
                 self.models[name] = None
 
@@ -86,7 +90,7 @@ class ModelManager:
             }
             
         except Exception as e:
-            print(f"[ModelManager] Prediction error for {model_name}: {e}")
+            logger.error(f"[ModelManager] Prediction error for {model_name}: {e}")
             return {
                 "gamma_5_prob": 0.05,
                 "gamma_10_prob": 0.02,

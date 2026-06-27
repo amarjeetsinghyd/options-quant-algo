@@ -3,8 +3,12 @@ import os
 import sys
 from datetime import datetime
 from src.core.market_calendar import MarketCalendar
+from src.utils.logger import get_logger
+from src.utils.instrumentation import get_db_connection
+from src.config.engineering_config import ML_DB_PATH as DB_PATH
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "ml_research.db")
+logger = get_logger("feature_monitor")
+
 
 class FeatureStabilityMonitor:
     """
@@ -35,7 +39,7 @@ class FeatureStabilityMonitor:
             else:
                 data_source = "UNKNOWN"
 
-            conn = sqlite3.connect(DB_PATH)
+            conn = get_db_connection(DB_PATH)
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO feature_importance (
@@ -52,7 +56,7 @@ class FeatureStabilityMonitor:
             conn.commit()
             conn.close()
         except Exception as e:
-            print(f"[FeatureStabilityMonitor] DB Write Error: {e}")
+            logger.error(f"[FeatureStabilityMonitor] DB Write Error: {e}")
 
     def check_drift_and_log(self, model_name, model_version, market_regime, current_feature_importances):
         """
@@ -78,7 +82,7 @@ class FeatureStabilityMonitor:
             else:
                 data_source = "UNKNOWN"
 
-            conn = sqlite3.connect(DB_PATH)
+            conn = get_db_connection(DB_PATH)
             cursor = conn.cursor()
             
             for feature, current_score in current_feature_importances.items():
@@ -119,6 +123,6 @@ class FeatureStabilityMonitor:
             conn.close()
             
         except Exception as e:
-            print(f"[FeatureStabilityMonitor] Error checking drift: {e}")
+            logger.error(f"[FeatureStabilityMonitor] Error checking drift: {e}")
             
         return warnings

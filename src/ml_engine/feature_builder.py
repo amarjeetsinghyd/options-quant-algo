@@ -4,6 +4,10 @@ import json
 import os
 import pandas as pd
 
+from src.utils.logger import get_logger
+logger = get_logger("feature_builder")
+
+
 REGISTRY_PATH = os.path.join(os.path.dirname(__file__), "feature_registry.json")
 
 def load_feature_registry():
@@ -168,7 +172,7 @@ def extract_features(state_snapshot, signal_data, current_df=None, premium_histo
                 else:
                     break
         except Exception as e:
-            print(f"[FeatureBuilder] Error calculating structure/candle features: {e}")
+            logger.error(f"[FeatureBuilder] Error calculating structure/candle features: {e}")
 
     features["distance_from_day_high"] = distance_from_day_high
     features["distance_from_day_low"] = distance_from_day_low
@@ -229,5 +233,5 @@ if __name__ == "__main__":
     ]
     
     res = extract_features(dummy_state, dummy_signal, current_df=dummy_df, premium_history=dummy_history)
-    print("Extracted Features:")
-    print(json.dumps(res, indent=2))
+    logger.info("Extracted Features:")
+    logger.info(json.dumps(res, indent=2))

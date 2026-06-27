@@ -1,15 +1,26 @@
 import sqlite3
 import os
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "ml_research.db")
+try:
+    import duckdb
+    DUCKDB_AVAILABLE = True
+except ImportError:
+    DUCKDB_AVAILABLE = False
+
+from src.utils.logger import get_logger
+logger = get_logger("ml_db")
+from src.utils.instrumentation import get_db_connection
+from src.config.engineering_config import ML_DB_PATH as DB_PATH, DUCKDB_PATH
+
+
 
 def init_ml_db(recreate=True):
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection(DB_PATH)
     cursor = conn.cursor()
 
     if recreate:
-        print("[ML Database] Dropping old tables to recreate clean upgraded schemas...")
+        logger.info("[ML Database] Dropping old tables to recreate clean upgraded schemas...")
         cursor.execute("DROP TABLE IF EXISTS model_predictions")
         cursor.execute("DROP TABLE IF EXISTS model_performance")
         cursor.execute("DROP TABLE IF EXISTS gamma_events")
@@ -206,7 +217,20 @@ def init_ml_db(recreate=True):
 
     conn.commit()
     conn.close()
+    
+    if DUCKDB_AVAILABLE:
+        try:
+            logger.info("[ML Database] Initializing DuckDB analytics engine...")
+            duck_conn = duckdb.connect(DUCKDB_PATH)
+            # Attach the sqlite database to duckdb for fast analytics
+            duck_conn.execute("INSTALL sqlite;")
+            duck_conn.execute("LOAD sqlite;")
+            duck_conn.execute(f"ATTACH IF NOT EXISTS '{DB_PATH}' AS sqlite_db (TYPE SQLITE);")
+            logger.info("[ML Database] Attached SQLite DB to DuckDB successfully.")
+            duck_conn.close()
+        except Exception as e:
+            logger.error(f"[ML Database] Could not attach SQLite to DuckDB: {e}")
 
 if __name__ == "__main__":
     init_ml_db(recreate=True)
-    print("ML Database initialized at:", DB_PATH)
+    logger.info(f"ML Database initialized at: {DB_PATH}")

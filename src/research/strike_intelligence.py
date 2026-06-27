@@ -5,13 +5,18 @@ import uuid
 from datetime import datetime
 import pandas as pd
 
+from src.utils.logger import get_logger
+from src.utils.instrumentation import get_db_connection
+from src.config.engineering_config import STRIKE_DB_PATH as DB_PATH
+from src.core.db_writer_queue import DBWriterQueue
 
-DB_PATH = "data/strike_research.db"
+logger = get_logger("strike_intelligence")
+
 
 
 def _get_conn():
     """Get a new SQLite connection (thread-safe: one connection per thread)."""
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = get_db_connection(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -232,7 +237,7 @@ def init_database():
     _apply_migrations(conn)
     conn.commit()
     conn.close()
-    print("[StrikeIntelligence] Database initialized.")
+    logger.info("[StrikeIntelligence] Database initialized.")
 
 
 class StrikeIntelligenceModule:
@@ -315,7 +320,7 @@ class StrikeIntelligenceModule:
             session_type = "UNIT_TEST"
 
         if session_type not in {"LIVE", "SIMULATION", "REPLAY", "UNIT_TEST"}:
-            print(f"[StrikeIntelligence] Session type is {session_type}. Blocking signal registration outside active hours.")
+            logger.info(f"[StrikeIntelligence] Session type is {session_type}. Blocking signal registration outside active hours.")
             return None, []
 
         signal_id = str(uuid.uuid4())
@@ -332,7 +337,7 @@ class StrikeIntelligenceModule:
         step = 100 if index_name == "SENSEX" else 50
         atm_strike = round(index_price / step) * step
 
-        print(f"[StrikeIntelligence] Signal {signal_type} detected. "
+        logger.info(f"[StrikeIntelligence] Signal {signal_type} detected. "
               f"Building universe around ATM={atm_strike} (index={index_price:.2f})")
 
         # Build option universe: ATM + 5 OTM
@@ -349,11 +354,11 @@ class StrikeIntelligenceModule:
             weekly_opts = fetcher.get_weekly_option_tokens()
             opts = weekly_opts[weekly_opts['symbol'].str.endswith(opt_type)]
         except Exception as e:
-            print(f"[StrikeIntelligence] Could not fetch option chain: {e}")
+            logger.info(f"[StrikeIntelligence] Could not fetch option chain: {e}")
             return None, []
 
         if opts.empty:
-            print("[StrikeIntelligence] Empty option chain. Aborting.")
+            logger.info("[StrikeIntelligence] Empty option chain. Aborting.")
             return None, []
 
         # Determine DTE
@@ -385,7 +390,7 @@ class StrikeIntelligenceModule:
                 })
 
         if not strike_rows:
-            print("[StrikeIntelligence] No matching strikes found. Aborting.")
+            logger.info("[StrikeIntelligence] No matching strikes found. Aborting.")
             return None, []
 
         # Determine which token was traded by the PaperTrader
@@ -606,15 +611,13 @@ class StrikeIntelligenceModule:
         }
 
         # Save signal snapshot to DB
-        conn = _get_conn()
         try:
             placeholders = ", ".join(f":{k}" for k in snapshot_data.keys())
             columns = ", ".join(snapshot_data.keys())
-            conn.execute(f"INSERT INTO signal_snapshots ({columns}) VALUES ({placeholders})", snapshot_data)
-            conn.commit()
+            sql = f"INSERT INTO signal_snapshots ({columns}) VALUES ({placeholders})"
+            DBWriterQueue.get_instance(DB_PATH).enqueue(sql, snapshot_data)
         except Exception as e:
-            print(f"[StrikeIntelligence] DB insert error (signal_snapshots): {e}")
-            conn.close()
+            logger.error(f"[StrikeIntelligence] Queue insert error (signal_snapshots): {e}")
             return None, []
 
         # Fetch full market depth snapshot for each strike (one API call per token)
@@ -632,7 +635,7 @@ class StrikeIntelligenceModule:
                     ltp_snapshots[tk] = float(item.get('ltp', 0))
                     depth_snapshots[tk] = item.get('depth', {})
         except Exception as e:
-            print(f"[StrikeIntelligence] Market depth fetch error: {e}")
+            logger.error(f"[StrikeIntelligence] Market depth fetch error: {e}")
 
         # Fetch Greeks (best-effort)
         try:
@@ -700,7 +703,7 @@ class StrikeIntelligenceModule:
         # Insert initial rows (tracking results will be updated after 180s)
         for row in db_rows:
             try:
-                conn.execute("""
+                sql = """
                     INSERT INTO strike_tracking
                     (signal_id, token, symbol, strike, option_type, distance_from_atm, dte,
                      was_traded, premium_bucket, entry_premium, bid_price, ask_price, bid_ask_spread, spread_pct,
@@ -711,12 +714,10 @@ class StrikeIntelligenceModule:
                      :was_traded, :premium_bucket, :entry_premium, :bid_price, :ask_price, :bid_ask_spread, :spread_pct,
                      :bid_qty, :ask_qty, :volume, :open_interest, :iv, :delta, :order_flow_score,
                      :entry_slippage_est)
-                """, row)
+                """
+                DBWriterQueue.get_instance(DB_PATH).enqueue(sql, row)
             except Exception as e:
-                print(f"[StrikeIntelligence] DB insert error (strike_tracking): {e}")
-
-        conn.commit()
-        conn.close()
+                logger.error(f"[StrikeIntelligence] Queue insert error (strike_tracking): {e}")
 
         # Build in-memory tracking session
         session = {
@@ -748,7 +749,7 @@ class StrikeIntelligenceModule:
                     self._token_session_map[tk] = set()
                 self._token_session_map[tk].add(signal_id)
 
-        print(f"[StrikeIntelligence] Tracking {len(strike_rows)} strikes for 180 seconds. "
+        logger.info(f"[StrikeIntelligence] Tracking {len(strike_rows)} strikes for 180 seconds. "
               f"Signal ID: {signal_id[:8]}...")
 
         # Return both signal_id and tokens_to_track
@@ -906,7 +907,7 @@ class StrikeIntelligenceModule:
                     if not self._token_session_map[tk]:
                         del self._token_session_map[tk]
 
-        print(f"[StrikeIntelligence] Finalizing session {signal_id[:8]}...")
+        logger.info(f"[StrikeIntelligence] Finalizing session {signal_id[:8]}...")
         conn = _get_conn()
 
         try:
@@ -975,7 +976,7 @@ class StrikeIntelligenceModule:
                 efq = 100 - (entry_slip / entry * 100) if entry > 0 else 0.0
                 exfq = 100 - (exit_slip / highest * 100) if highest > 0 else 0.0
 
-                conn.execute("""
+                DBWriterQueue.get_instance(DB_PATH).enqueue("""
                     UPDATE strike_tracking SET
                         hit_target = ?,
                         time_to_target_sec = ?,
@@ -1012,18 +1013,17 @@ class StrikeIntelligenceModule:
             total_ticks_received = sum(len(tk_data.get('spreads', [])) for tk_data in session['tokens'].values())
             obs_status = 'FINALIZED' if total_ticks_received > 0 else 'CORRUPTED'
             
-            conn.execute("""
+            DBWriterQueue.get_instance(DB_PATH).enqueue("""
                 UPDATE signal_snapshots SET
                     virtual_tracking_completed = 1,
                     observation_status = ?
                 WHERE signal_id = ?
             """, (obs_status, signal_id))
 
-            conn.commit()
-            print(f"[StrikeIntelligence] Session {signal_id[:8]} finalized and saved to DB (Status: {obs_status}).")
+            logger.info(f"[StrikeIntelligence] Session {signal_id[:8]} finalized and queued to DB (Status: {obs_status}).")
 
         except Exception as e:
-            print(f"[StrikeIntelligence] Error finalizing session {signal_id[:8]}: {e}")
+            logger.error(f"[StrikeIntelligence] Error finalizing session {signal_id[:8]}: {e}")
         finally:
             conn.close()
             with self._lock:

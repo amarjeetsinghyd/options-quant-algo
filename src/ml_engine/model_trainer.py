@@ -8,9 +8,14 @@ from src.ml_engine.data_validator import DataValidator
 from src.ml_engine.leakage_detector import LeakageDetector
 from src.ml_engine.walk_forward_validator import WalkForwardValidator
 
+from src.utils.logger import get_logger
+logger = get_logger("model_trainer")
+from src.utils.instrumentation import get_db_connection
+from src.config.engineering_config import ML_DB_PATH as DB_PATH
+
+
 MODELS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "models")
 REGISTRY_PATH = os.path.join(MODELS_DIR, "registry.json")
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "ml_research.db")
 
 class ModelTrainer:
     def __init__(self):
@@ -37,22 +42,22 @@ class ModelTrainer:
             raise RuntimeError("Hardware Protection Active: Training is blocked during market hours (09:15 - 15:30).")
 
     def run_training_pipeline(self):
-        print("Starting ML Training Pipeline...")
+        logger.info("Starting ML Training Pipeline...")
         self._check_hardware_protection()
         
         # 1. Load Data
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection(DB_PATH)
         # We would pull from gamma_events, non_gamma_events, and model_predictions
         df = pd.DataFrame() # Placeholder for actual historical query
         conn.close()
         
         if len(df) < 500:
-            print("Not enough samples yet. Need 500+ events to train. Currently at Level 0 (Collection Data).")
+            logger.info("Not enough samples yet. Need 500+ events to train. Currently at Level 0 (Collection Data).")
             return
 
         # 2. Data Quality Layer
         df, drop_report = DataValidator.validate_training_batch(df)
-        print("Data Validation Report:", drop_report)
+        logger.info("Data Validation Report:", drop_report)
         
         # 3. Leakage Protection
         df = LeakageDetector.filter_leaky_columns(df)
@@ -60,7 +65,7 @@ class ModelTrainer:
         # 4. Train Models
         models_to_train = ["LightGBM", "XGBoost", "RandomForest", "CatBoost"]
         for model_name in models_to_train:
-            print(f"Training {model_name}...")
+            logger.info(f"Training {model_name}...")
             
             # 5. Walk Forward Validation
             metrics = self.validator.validate(model_name, df)
@@ -78,11 +83,11 @@ class ModelTrainer:
             })
             
         self._save_registry()
-        print("Training pipeline completed successfully.")
+        logger.info("Training pipeline completed successfully.")
 
 if __name__ == "__main__":
     trainer = ModelTrainer()
     try:
         trainer.run_training_pipeline()
     except Exception as e:
-        print(f"Training failed: {e}")
+        logger.info(f"Training failed: {e}")

@@ -12,8 +12,13 @@ import pandas as pd
 from src.core.market_calendar import MarketCalendar
 from src.ml_engine.feature_builder import extract_features
 from src.ml_engine.data_validator import DataValidator
+from src.utils.logger import get_logger
+from src.utils.instrumentation import get_db_connection
+from src.config.engineering_config import ML_DB_PATH as DB_PATH
+from src.core.db_writer_queue import DBWriterQueue
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "ml_research.db")
+logger = get_logger("gamma_event_collector")
+
 
 class GammaEventCollector:
     MAX_TRACKING_SYMBOLS = 100
@@ -34,10 +39,10 @@ class GammaEventCollector:
         # Start background worker thread
         self.worker_thread = threading.Thread(target=self._db_worker, daemon=True)
         self.worker_thread.start()
-        print("[GammaEventCollector] Background DB Worker Thread initialized.")
+        logger.info("Background DB Worker Thread initialized.")
 
     def _get_db_conn(self):
-        return sqlite3.connect(DB_PATH)
+        return get_db_connection(DB_PATH)
 
     def feed_tick(self, symbol, price, index_price, market_state, option_details, exchange_timestamp=None):
         """
@@ -227,7 +232,7 @@ class GammaEventCollector:
                 self._process_and_log_event(session)
                 self.event_queue.task_done()
             except Exception as e:
-                print(f"[GammaEventCollector Worker] Error processing queued event: {e}")
+                logger.error(f"Error processing queued event: {e}")
                 time.sleep(1)
 
     def _process_and_log_event(self, session):
@@ -308,7 +313,7 @@ class GammaEventCollector:
         first_features = feature_evolution[0] if feature_evolution else {}
         is_valid, validation_reason = DataValidator.validate_sample(first_features, session["event_id"], symbol)
         if not is_valid:
-            print(f"[GammaEventCollector] Dropped event {session['event_id'][:8]} due to Quality Check: {validation_reason}")
+            logger.warning(f"Dropped event {session['event_id'][:8]} due to Quality Check: {validation_reason}", extra={"event_id": session['event_id']})
             return # Dropped immediately
 
         # 5. Calculate data governance columns
@@ -376,10 +381,8 @@ class GammaEventCollector:
         table = "gamma_events" if quality > 0 else "non_gamma_events"
         
         try:
-            with self._get_db_conn() as conn:
-                cursor = conn.cursor()
-                cursor.execute(f"""
-                    INSERT INTO {table} (
+            sql = f"""
+                INSERT INTO {table} (
                         event_id, timestamp, index_name, option_symbol, strike, 
                         distance_from_atm, premium_before, premium_after, 
                         percentage_move, time_taken_seconds, dte, 
@@ -391,50 +394,50 @@ class GammaEventCollector:
                         liquidity_score, spread_before_event,
                         session_type, data_source, quality_score, connection_quality,
                         observation_status, observation_version, exchange_timestamp,
-                        local_timestamp, latency_ms, market_state
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    session["event_id"],
-                    local_ts,
-                    session["option_details"].get("index_name", "UNKNOWN"),
-                    symbol,
-                    session["option_details"].get("strike", 0.0),
-                    session["option_details"].get("distance", 0),
-                    p_start,
-                    p_end,
-                    ((p_end - p_start) / p_start * 100) if p_start > 0 else 0.0,
-                    int(session["detection_time"] - t_start),
-                    session["option_details"].get("dte", 0),
-                    json.dumps(session["pre_market_state"]),
-                    "BACKGROUND_COLLECTOR",
-                    quality,
-                    pre_event_snapshot,
-                    post_event_snapshot,
-                    int(session["detection_time"] - t_start), # gamma timeframe
-                    max_attempted_move,
-                    rejection_after_move,
-                    failure_reason,
-                    first_features.get("meta_versions", {}).get("market_regime", "v1"),
-                    "v5.2", # collector_version
-                    "v5.2", # calculation_version
-                    json.dumps(timestamp_sequence),
-                    json.dumps(premium_path),
-                    json.dumps(underlying_path),
-                    json.dumps(feature_evolution),
-                    first_features.get("ofa_score", 0.0), # liquidity_score proxy
-                    session["option_details"].get("spread", 0.0), # spread_before_event
-                    session_type,
-                    data_source,
-                    q_score,
-                    conn_quality,
-                    "FINALIZED",
-                    "v5.2",
-                    exch_ts,
-                    local_ts,
-                    latency_ms,
-                    "NORMAL"
-                ))
-                conn.commit()
-                print(f"[GammaEventCollector] Successfully logged Quality {quality} event for {symbol} to {table} table. ID: {session['event_id'][:8]}...")
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+            params = (
+                session["event_id"],
+                local_ts,
+                session["option_details"].get("index_name", "UNKNOWN"),
+                symbol,
+                session["option_details"].get("strike", 0.0),
+                session["option_details"].get("distance", 0),
+                p_start,
+                p_end,
+                ((p_end - p_start) / p_start * 100) if p_start > 0 else 0.0,
+                int(session["detection_time"] - t_start),
+                session["option_details"].get("dte", 0),
+                json.dumps(session["pre_market_state"]),
+                "BACKGROUND_COLLECTOR",
+                quality,
+                pre_event_snapshot,
+                post_event_snapshot,
+                int(session["detection_time"] - t_start), # gamma timeframe
+                max_attempted_move,
+                rejection_after_move,
+                failure_reason,
+                first_features.get("meta_versions", {}).get("market_regime", "v1"),
+                "v5.2", # collector_version
+                "v5.2", # calculation_version
+                json.dumps(timestamp_sequence),
+                json.dumps(premium_path),
+                json.dumps(underlying_path),
+                json.dumps(feature_evolution),
+                first_features.get("ofa_score", 0.0), # liquidity_score proxy
+                session["option_details"].get("spread", 0.0), # spread_before_event
+                session_type,
+                data_source,
+                q_score,
+                conn_quality,
+                "FINALIZED",
+                "v5.2",
+                exch_ts,
+                local_ts,
+                latency_ms,
+                "NORMAL"
+            )
+            DBWriterQueue.get_instance(DB_PATH).enqueue(sql, params)
+            logger.info(f"Successfully queued Quality {quality} event for {symbol} to {table} table. ID: {session['event_id'][:8]}...", extra={"event_id": session['event_id'], "latency_ms": latency_ms, "database_name": "ml_research.db"})
         except Exception as e:
-            print(f"[GammaEventCollector DB Writer] SQLite Insert Error: {e}")
+            logger.error(f"Queue Insert Error: {e}", extra={"database_name": "ml_research.db"})

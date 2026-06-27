@@ -5,7 +5,12 @@ import pandas as pd
 
 from src.ml_engine.leakage_detector import LeakageDetector
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "ml_research.db")
+from src.utils.logger import get_logger
+logger = get_logger("dataset_builder")
+from src.utils.instrumentation import get_db_connection
+from src.config.engineering_config import ML_DB_PATH as DB_PATH
+
+
 
 class DatasetBuilder:
     """
@@ -21,7 +26,7 @@ class DatasetBuilder:
             return pd.DataFrame()
             
         try:
-            conn = sqlite3.connect(DB_PATH)
+            conn = get_db_connection(DB_PATH)
             # Query both tables
             gamma_df = pd.read_sql_query("SELECT * FROM gamma_events", conn)
             non_gamma_df = pd.read_sql_query("SELECT * FROM non_gamma_events", conn)
@@ -31,7 +36,7 @@ class DatasetBuilder:
             df = pd.concat([gamma_df, non_gamma_df], ignore_index=True)
             return df
         except Exception as e:
-            print(f"[DatasetBuilder] Database read error: {e}")
+            logger.error(f"[DatasetBuilder] Database read error: {e}")
             return pd.DataFrame()
 
     @classmethod
@@ -44,7 +49,7 @@ class DatasetBuilder:
         """
         raw_df = cls._fetch_raw_events()
         if raw_df.empty:
-            print("[DatasetBuilder] Warning: No events found in database.")
+            logger.warning("[DatasetBuilder] Warning: No events found in database.")
             return pd.DataFrame()
 
         processed_rows = []
@@ -76,7 +81,7 @@ class DatasetBuilder:
                 
                 processed_rows.append(features)
             except Exception as e:
-                print(f"[DatasetBuilder] Error parsing snapshot for event {row.get('event_id')}: {e}")
+                logger.error(f"[DatasetBuilder] Error parsing snapshot for event {row.get('event_id')}: {e}")
 
         if not processed_rows:
             return pd.DataFrame()
@@ -91,20 +96,20 @@ class DatasetBuilder:
             if experiment_name == "EXPIRY_ONLY":
                 # Train only on expiry days (DTE = 0)
                 df = df[df["dte"] == 0]
-                print(f"[DatasetBuilder] Applied EXPIRY_ONLY filter: {initial_len} -> {len(df)} samples.")
+                logger.info(f"[DatasetBuilder] Applied EXPIRY_ONLY filter: {initial_len} -> {len(df)} samples.")
                 
             elif experiment_name == "TRENDING_DAYS":
                 # Train only on trending days (regime == 1)
                 df = df[df["market_regime"] == 1]
-                print(f"[DatasetBuilder] Applied TRENDING_DAYS filter: {initial_len} -> {len(df)} samples.")
+                logger.info(f"[DatasetBuilder] Applied TRENDING_DAYS filter: {initial_len} -> {len(df)} samples.")
                 
             elif experiment_name == "ATM_ONLY":
                 # Train only on At-The-Money options (distance == 0)
                 df = df[df["distance_from_atm"] == 0]
-                print(f"[DatasetBuilder] Applied ATM_ONLY filter: {initial_len} -> {len(df)} samples.")
+                logger.info(f"[DatasetBuilder] Applied ATM_ONLY filter: {initial_len} -> {len(df)} samples.")
                 
             else:
-                print(f"[DatasetBuilder] Warning: Unknown experiment name '{experiment_name}'. No filters applied.")
+                logger.warning(f"[DatasetBuilder] Warning: Unknown experiment name '{experiment_name}'. No filters applied.")
 
         # Apply Custom Filters (e.g. {"index_name": "SENSEX", "strike": 75000})
         if custom_filters and isinstance(custom_filters, dict):
@@ -121,7 +126,7 @@ if __name__ == "__main__":
     # Test harness
     df = DatasetBuilder.build_training_dataframe()
     if not df.empty:
-        print("Tabular training columns:", df.columns.tolist())
-        print("Sample size:", len(df))
+        logger.info("Tabular training columns:", df.columns.tolist())
+        logger.info("Sample size:", len(df))
     else:
-        print("Database is empty or could not be read.")
+        logger.info("Database is empty or could not be read.")

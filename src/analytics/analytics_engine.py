@@ -4,7 +4,12 @@ import time
 import os
 import numpy as np
 
-DB_PATH = "data/strike_research.db"
+
+from src.utils.logger import get_logger
+from src.utils.instrumentation import get_db_connection
+from src.config.engineering_config import ML_STRIKE_DB_PATH, STRIKE_STRIKE_DB_PATH
+
+logger = get_logger("analytics")
 
 class AnalyticsEngine:
     def __init__(self):
@@ -13,14 +18,14 @@ class AnalyticsEngine:
         self.CACHE_TTL = 15  # 15 seconds caching
 
     def _get_data(self):
-        if not os.path.exists(DB_PATH):
+        if not os.path.exists(STRIKE_DB_PATH):
             return pd.DataFrame()
             
         now = time.time()
         if self._cache is not None and (now - self._cache_time) < self.CACHE_TTL:
             return self._cache
             
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection(STRIKE_DB_PATH)
         try:
             df = pd.read_sql_query("""
                 SELECT
@@ -42,11 +47,12 @@ class AnalyticsEngine:
                     elif premium < 70: return "₹40-70"
                     elif premium < 100: return "₹70-100"
                     else: return "₹100+"
+                    df['premium_bucket'] = df['entry_premium'].apply(_pct_bucket)
                 df['premium_bucket'] = df['entry_premium'].apply(_pct_bucket)
                 self._cache = df
                 self._cache_time = now
         except Exception as e:
-            print(f"[Analytics] Error loading data: {e}")
+            logger.error(f"Error loading data: {e}")
             df = pd.DataFrame()
         finally:
             conn.close()
@@ -500,7 +506,7 @@ class AnalyticsEngine:
             sig_type = f"{cat} - {f_name}" if f_name and f_name != 'nan' else cat
             
             # Read file modification time of DB
-            mtime = os.path.getmtime(DB_PATH)
+            mtime = os.path.getmtime(STRIKE_DB_PATH)
             mtime_str = pd.to_datetime(mtime, unit='s').strftime("%Y-%m-%d %H:%M:%S")
             
             return {
@@ -648,8 +654,7 @@ class AnalyticsEngine:
         import sqlite3
         import os
         import json
-        db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "ml_research.db")
-        
+                
         data = {
             "ml_maturity": {"level": 0, "samples": 0},
             "quality_distribution": {
@@ -671,11 +676,11 @@ class AnalyticsEngine:
             }
         }
         
-        if not os.path.exists(db_path):
+        if not os.path.exists(ML_DB_PATH):
             return data
             
         try:
-            with sqlite3.connect(db_path) as conn:
+            with get_db_connection(ML_DB_PATH) as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
                 
@@ -803,6 +808,6 @@ class AnalyticsEngine:
                     })
                     
         except Exception as e:
-            print(f"[ML Analytics] DB Error: {e}")
+            logger.error(f"[ML Analytics] DB Error: {e}")
             
         return data

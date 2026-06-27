@@ -8,8 +8,12 @@ from src.core.market_calendar import MarketCalendar
 from src.ml_engine.model_manager import ModelManager
 from src.ml_engine.ensemble_engine import EnsembleEngine
 from src.ml_engine.leakage_detector import LeakageDetector
+from src.utils.logger import get_logger
+from src.utils.instrumentation import get_db_connection
+from src.config.engineering_config import ML_DB_PATH as DB_PATH
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "ml_research.db")
+logger = get_logger("shadow_predictor")
+
 
 class ShadowPredictor:
     """
@@ -79,7 +83,7 @@ class ShadowPredictor:
             else:
                 data_source = "UNKNOWN"
                 
-            conn = sqlite3.connect(DB_PATH)
+            conn = get_db_connection(DB_PATH)
             cursor = conn.cursor()
             
             for model, preds in predictions.items():
@@ -105,4 +109,4 @@ class ShadowPredictor:
             conn.close()
             
         except Exception as e:
-            print(f"[ShadowPredictor] Error generating predictions: {e}")
+            logger.error(f"[ShadowPredictor] Error generating predictions: {e}")

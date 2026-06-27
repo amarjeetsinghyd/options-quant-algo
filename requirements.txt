@@ -11,3 +11,6 @@ xgboost
 lightgbm
 catboost
 shap
+duckdb
+pyzmq
+polars

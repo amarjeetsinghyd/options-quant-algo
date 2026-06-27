@@ -5,6 +5,10 @@ from SmartApi import SmartConnect
 from SmartApi.smartWebSocketV2 import SmartWebSocketV2
 import urllib.request
 
+from src.utils.logger import get_logger
+logger = get_logger("angel_connection")
+
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -57,7 +61,7 @@ if __name__ == "__main__":
         
         # A simple API call to check profile, validating the connection
         profile = smartApi.getProfile(session_data['refreshToken'])
-        print("Successfully connected to Angel One!")
-        print(f"Logged in as: {profile['data']['name']}")
+        logger.info("Successfully connected to Angel One!")
+        logger.info(f"Logged in as: {profile['data']['name']}")
     except Exception as e:
-        print(f"Error connecting to Angel One: {e}")
+        logger.error(f"Error connecting to Angel One: {e}")

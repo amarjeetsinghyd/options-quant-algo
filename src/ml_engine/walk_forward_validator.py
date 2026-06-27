@@ -2,6 +2,10 @@ import os
 from datetime import datetime
 import json
 
+from src.utils.logger import get_logger
+logger = get_logger("walk_forward_validator")
+
+
 class WalkForwardValidator:
     """
     Time-series based walk forward testing.
@@ -33,5 +37,5 @@ class WalkForwardValidator:
         # 4. Average the metrics across all splits
         
         # Placeholder for returning dummy metrics
-        print("[WalkForwardValidator] Time-series validation complete.")
+        logger.info("[WalkForwardValidator] Time-series validation complete.")
         return metrics

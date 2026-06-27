@@ -11,15 +11,20 @@ import pandas as pd
 from datetime import datetime
 import os
 
-DB_PATH = "data/strike_research.db"
+from src.utils.logger import get_logger
+logger = get_logger("report_generator")
+from src.utils.instrumentation import get_db_connection
+from src.config.engineering_config import STRIKE_DB_PATH as DB_PATH
+
+
 
 
 def load_data() -> pd.DataFrame:
     if not os.path.exists(DB_PATH):
-        print(f"[Report] Database not found at {DB_PATH}. No data yet.")
+        logger.info(f"[Report] Database not found at {DB_PATH}. No data yet.")
         return pd.DataFrame()
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection(DB_PATH)
     try:
         df = pd.read_sql_query("""
             SELECT
@@ -48,7 +53,7 @@ def load_data() -> pd.DataFrame:
             WHERE st.entry_premium > 0
         """, conn)
     except sqlite3.OperationalError as e:
-        print(f"[Report] Database schema error (are migrations applied?): {e}")
+        logger.error(f"[Report] Database schema error (are migrations applied?): {e}")
         df = pd.DataFrame()
     finally:
         conn.close()
@@ -65,27 +70,27 @@ def _dte_bucket(dte):
 
 
 def print_separator(title=""):
-    print("\n" + "-" * 80)
+    logger.info("\n" + "-" * 80)
     if title:
-        print(f"  {title}")
-        print("-" * 80)
+        logger.info(f"  {title}")
+        logger.info("-" * 80)
 
 
 def generate_report():
     print_separator("STRIKE INTELLIGENCE ANALYTICS REPORT")
-    print(f"  Generated: {datetime.now().strftime('%d %b %Y  %H:%M:%S')}")
-    print(f"  Database : {DB_PATH}")
+    logger.info(f"  Generated: {datetime.now().strftime('%d %b %Y  %H:%M:%S')}")
+    logger.info(f"  Database : {DB_PATH}")
 
     df = load_data()
 
     if df.empty:
-        print("\n  No data available yet. Run the engine and generate signals first.")
+        logger.info("\n  No data available yet. Run the engine and generate signals first.")
         return
 
     total_signals = df['signal_id'].nunique()
     total_rows = len(df)
-    print(f"\n  Total Signals Tracked : {total_signals}")
-    print(f"  Total Strike Rows     : {total_rows}")
+    logger.info(f"\n  Total Signals Tracked : {total_signals}")
+    logger.info(f"  Total Strike Rows     : {total_rows}")
 
     # Ensure premium_bucket exists (fallback if migration is fresh and some rows lack it)
     if 'premium_bucket' not in df.columns:
@@ -129,7 +134,7 @@ def generate_report():
     
     prem_df = prem_df.sort_values('avg_score', ascending=False)
     prem_df.columns = ['Premium Bucket', 'Total', 'Hits', 'Avg Time(s)', 'Avg Score', 'Avg Spread%', 'Avg Liq Drop%', 'Success%']
-    print(prem_df.to_string(index=False))
+    logger.info(prem_df.to_string(index=False))
 
     # ──────────────────────────────────────────────
     # 2. Fastest Strike Category (Distance)
@@ -152,7 +157,7 @@ def generate_report():
     dist_df['Distance'] = dist_df['Distance'].apply(lambda x: 'ATM' if x == 0 else f'OTM{x}')
     
     dist_df = dist_df.sort_values('Avg Time(s)', ascending=True)
-    print(dist_df.to_string(index=False))
+    logger.info(dist_df.to_string(index=False))
 
     # ──────────────────────────────────────────────
     # 3. Multi-Time Acceleration Analysis
@@ -173,9 +178,9 @@ def generate_report():
         )
         time_df = time_df.round(2)
         time_df.columns = ['Premium Bucket', 'Ret 30s (%)', 'Ret 60s (%)', 'Ret 120s (%)', 'Ret 180s (%)']
-        print(time_df.to_string(index=False))
+        logger.info(time_df.to_string(index=False))
     else:
-        print("  Multi-time snapshots not available in dataset yet.")
+        logger.info("  Multi-time snapshots not available in dataset yet.")
 
     # ──────────────────────────────────────────────
     # 4. Time of Day Analysis
@@ -196,9 +201,9 @@ def generate_report():
         tod_df['avg_time'] = tod_df['avg_time'].round(1)
         tod_df['avg_score'] = tod_df['avg_score'].round(1)
         tod_df.columns = ['Session', 'Total', 'Hits', 'Avg Time(s)', 'Avg Score', 'Success%']
-        print(tod_df.to_string(index=False))
+        logger.info(tod_df.to_string(index=False))
     else:
-        print("  Time of day data not available.")
+        logger.info("  Time of day data not available.")
 
     # ──────────────────────────────────────────────
     # 5. Strategy Type Analysis
@@ -218,7 +223,7 @@ def generate_report():
     strat_df['avg_time'] = strat_df['avg_time'].round(1)
     strat_df['avg_score'] = strat_df['avg_score'].round(1)
     strat_df.columns = ['Strategy', 'Total', 'Hits', 'Avg Time(s)', 'Avg Score', 'Success%']
-    print(strat_df.to_string(index=False))
+    logger.info(strat_df.to_string(index=False))
 
     # ──────────────────────────────────────────────
     # 6. Strategy Validity Report
@@ -237,9 +242,9 @@ def generate_report():
         val_df['valid_hits_pct'] = (val_df['hits_while_valid'] / val_df['total_hits'] * 100).round(1)
         val_df['avg_alive_sec'] = val_df['avg_alive_sec'].round(1)
         val_df.columns = ['Strategy', 'Total Hits', 'Hits while Valid', 'Avg Alive Duration(s)', 'Valid Hits%']
-        print(val_df.to_string(index=False))
+        logger.info(val_df.to_string(index=False))
     else:
-        print("  Strategy validity data not available.")
+        logger.info("  Strategy validity data not available.")
 
     # ──────────────────────────────────────────────
     # 7. Enhanced Missed Opportunity Analysis
@@ -278,10 +283,10 @@ def generate_report():
     if len(comparison_rows) > 0:
         missed_df = pd.DataFrame(comparison_rows)
         missed_df.columns = ['Strategy', 'Traded Strike', 'Best Strike', 'Score Delta', 'Best Bucket', 'Fill Quality (Traded/Best)']
-        print(missed_df.to_string(index=False))
-        print(f"\n  Total sub-optimal strike selections: {len(missed_df)}")
+        logger.info(missed_df.to_string(index=False))
+        logger.info(f"\n  Total sub-optimal strike selections: {len(missed_df)}")
     else:
-        print("  No sub-optimal selections found.")
+        logger.info("  No sub-optimal selections found.")
 
     # ──────────────────────────────────────────────
     # 8. Filter Intelligence Report (Phase 3)
@@ -301,9 +306,9 @@ def generate_report():
         rejected_signals = signal_perf[signal_perf['category'] == 'REJECTED']
         
         if rejected_signals.empty:
-            print("  No rejected signals logged yet.")
+            logger.info("  No rejected signals logged yet.")
         else:
-            print(f"  Total Rejected Signals Tracked: {len(rejected_signals)}\n")
+            logger.info(f"  Total Rejected Signals Tracked: {len(rejected_signals)}\n")
             
             filters = rejected_signals.groupby(['filter_name', 'rejection_stage']).agg(
                 total=('signal_id', 'count'),
@@ -318,24 +323,24 @@ def generate_report():
             
             disp_df = filters[['filter_name', 'rejection_stage', 'total', 'correct_rejects', 'false_rejects', 'protection_rate', 'avg_missed_return']]
             disp_df.columns = ['Filter', 'Stage', 'Total', 'Correct Rej', 'False Rej', 'Protection%', 'Avg Missed Ret%']
-            print(disp_df.to_string(index=False))
+            logger.info(disp_df.to_string(index=False))
             
-            print("\n  Danger Alerts:")
+            logger.info("\n  Danger Alerts:")
             alerts_found = False
             for _, row in filters.iterrows():
                 if row['false_reject_rate'] > 30 and row['total'] >= 3:
-                    print(f"  [WARNING] Filter '{row['filter_name']}' has a {row['false_reject_rate']}% false rejection rate!")
-                    print(f"            It rejected {row['total']} signals, but {row['false_rejects']} of them reached 10% target.")
+                    logger.warning(f"  [WARNING] Filter '{row['filter_name']}' has a {row['false_reject_rate']}% false rejection rate!")
+                    logger.info(f"            It rejected {row['total']} signals, but {row['false_rejects']} of them reached 10% target.")
                     alerts_found = True
                     
             if not alerts_found:
-                print("  No warnings. Filters are performing within acceptable bounds.")
+                logger.warning("  No warnings. Filters are performing within acceptable bounds.")
     else:
-        print("  Filter intelligence data not available yet (schema update required).")
+        logger.info("  Filter intelligence data not available yet (schema update required).")
 
     print_separator()
-    print("  End of Report")
-    print("-" * 80 + "\n")
+    logger.info("  End of Report")
+    logger.info("-" * 80 + "\n")
 
 
 if __name__ == "__main__":

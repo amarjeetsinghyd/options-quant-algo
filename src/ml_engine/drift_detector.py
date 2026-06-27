@@ -1,7 +1,12 @@
 import sqlite3
 import os
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "ml_research.db")
+from src.utils.logger import get_logger
+logger = get_logger("drift_detector")
+from src.utils.instrumentation import get_db_connection
+from src.config.engineering_config import ML_DB_PATH as DB_PATH
+
+
 
 class DriftDetector:
     """
@@ -21,7 +26,7 @@ class DriftDetector:
         Returns drift warnings if thresholds are breached, else None.
         """
         try:
-            conn = sqlite3.connect(DB_PATH)
+            conn = get_db_connection(DB_PATH)
             cursor = conn.cursor()
             
             # Fetch the last 100 predictions with finalized outcomes
@@ -82,5 +87,5 @@ class DriftDetector:
             return None
             
         except Exception as e:
-            print(f"[DriftDetector] Error checking for drift: {e}")
+            logger.error(f"[DriftDetector] Error checking for drift: {e}")
             return None

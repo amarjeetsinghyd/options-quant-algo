@@ -3,8 +3,12 @@ from datetime import datetime
 import os
 import sys
 from src.core.market_calendar import MarketCalendar
+from src.utils.logger import get_logger
+from src.utils.instrumentation import get_db_connection
+from src.config.engineering_config import ML_DB_PATH as DB_PATH
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "ml_research.db")
+logger = get_logger("data_validator")
+
 
 class DataValidator:
     """
@@ -35,7 +39,7 @@ class DataValidator:
             else:
                 data_source = "UNKNOWN"
                 
-            conn = sqlite3.connect(DB_PATH)
+            conn = get_db_connection(DB_PATH)
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO data_quality_log (
@@ -52,7 +56,7 @@ class DataValidator:
             conn.commit()
             conn.close()
         except Exception as e:
-            print(f"[DataValidator] Error writing to data_quality_log: {e}")
+            logger.error(f"[DataValidator] Error writing to data_quality_log: {e}")
 
     @classmethod
     def validate_sample(cls, features, event_id, symbol):
@@ -107,7 +111,7 @@ class DataValidator:
                                       f"Found {gap_count} timestamp gaps. Max gap: {max_gap_seconds}s.")
                 return True, f"Found {gap_count} gaps, max gap: {max_gap_seconds}s."
         except Exception as e:
-            print(f"[DataValidator] Gap detection error: {e}")
+            logger.error(f"[DataValidator] Gap detection error: {e}")
             
         return False, ""
 

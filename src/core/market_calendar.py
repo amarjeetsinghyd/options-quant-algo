@@ -1,6 +1,10 @@
 import sys
 from datetime import datetime, date, time, timedelta
 
+from src.utils.logger import get_logger
+logger = get_logger("market_calendar")
+
+
 # Indian Stock Market Holidays 2026 (Extendable)
 # Reference: NSE/BSE Official Holiday List
 HOLIDAYS_2026 = {
@@ -148,5 +152,5 @@ class MarketCalendar:
 
 if __name__ == "__main__":
     # Small self-test
-    print("Market Open Now?", MarketCalendar.is_market_open())
-    print("Session Type:", MarketCalendar.get_session_type())
+    logger.info("Market Open Now?", MarketCalendar.is_market_open())
+    logger.info("Session Type:", MarketCalendar.get_session_type())

@@ -5,6 +5,10 @@ import requests
 import pandas as pd
 from datetime import datetime, timedelta
 
+from src.utils.logger import get_logger
+logger = get_logger("data_fetcher")
+
+
 MASTER_URL = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
 CACHE_FILE = "data/OpenAPIScripMaster.json"
 
@@ -110,7 +114,7 @@ class DataFetcher:
     def _load_tokens(self):
         os.makedirs("data", exist_ok=True)
         if not os.path.exists(CACHE_FILE):
-            print("Downloading token master list (this happens once a day)...")
+            logger.info("Downloading token master list (this happens once a day)...")
             data = requests.get(MASTER_URL).json()
             with open(CACHE_FILE, 'w') as f:
                 json.dump(data, f)
@@ -138,7 +142,7 @@ class DataFetcher:
         fut_df = df[(df['name'] == name) & (df['exch_seg'] == exch_seg) & (df['instrumenttype'] == 'FUTIDX')].copy()
         
         if fut_df.empty:
-            print(f"ERROR: Could not find Futures for {name} on {exch_seg}.")
+            logger.error(f"ERROR: Could not find Futures for {name} on {exch_seg}.")
             return None, None, None
             
         fut_df['expiry_dt'] = pd.to_datetime(fut_df['expiry'], format='%d%b%Y', errors='coerce')
@@ -182,13 +186,13 @@ class DataFetcher:
                 if "exceeding access rate" in err_msg or "Access denied" in err_msg or "rate limit" in err_msg.lower():
                     # Back off and try again
                     if attempt < max_retries - 1:
-                        print(f"    API Rate Limit hit (attempt {attempt+1}/{max_retries}). Retrying in {delay:.1f}s...")
+                        logger.info(f"    API Rate Limit hit (attempt {attempt+1}/{max_retries}). Retrying in {delay:.1f}s...")
                         time.sleep(delay)
                         delay *= 2.0
                         continue
                 # If it's a different error or we've run out of retries, raise
                 if attempt < max_retries - 1:
-                    print(f"    API call failed (attempt {attempt+1}/{max_retries}): {e}. Retrying in {delay:.1f}s...")
+                    logger.info(f"    API call failed (attempt {attempt+1}/{max_retries}): {e}. Retrying in {delay:.1f}s...")
                     time.sleep(delay)
                     delay *= 2.0
                 else:
@@ -246,7 +250,7 @@ class DataFetcher:
                 time.sleep(0.4)
                 
             except Exception as e:
-                print(f"  Warning: Could not fetch volume for {stock_name}: {e}")
+                logger.warning(f"  Warning: Could not fetch volume for {stock_name}: {e}")
                 time.sleep(1.0)
                 continue
         
@@ -254,7 +258,7 @@ class DataFetcher:
             # Sum across all constituent columns to get synthetic volume
             all_volumes = all_volumes.fillna(0)
             all_volumes['synthetic_volume'] = all_volumes.sum(axis=1)
-            print(f"  Synthetic Volume Engine: {fetched_count}/{len(constituents)} constituents loaded.")
+            logger.info(f"  Synthetic Volume Engine: {fetched_count}/{len(constituents)} constituents loaded.")
             return all_volumes[['synthetic_volume']]
         
         return None
@@ -281,7 +285,7 @@ class DataFetcher:
                 df['timestamp'] = pd.to_datetime(df['timestamp'])
                 return df
         except Exception as e:
-            print(f"Error fetching candles for token {token}: {e}")
+            logger.error(f"Error fetching candles for token {token}: {e}")
         return pd.DataFrame()
 
     def get_historical_candles_with_synthetic_volume(self, days_back=5):
@@ -291,11 +295,11 @@ class DataFetcher:
         volume aggregation approach for the Cash Index.
         """
         token, name, exchange = self.get_cash_index_token()
-        print(f"Fetching {name} Cash Index price data from {exchange}...")
+        logger.info(f"Fetching {name} Cash Index price data from {exchange}...")
         price_df = self.get_historical_candles(exchange, token, "ONE_MINUTE", days_back=days_back)
         
         if price_df.empty:
-            print(f"ERROR: Could not fetch {name} Cash Index price data.")
+            logger.error(f"ERROR: Could not fetch {name} Cash Index price data.")
             return pd.DataFrame()
         
         # --- PRECISION SCOUTING LOGIC ---
@@ -308,9 +312,9 @@ class DataFetcher:
         min_timestamp = price_df['timestamp'].min()
         price_df = price_df.drop(columns=['date'])
         
-        print(f"{name} Cash Index: {len(price_df)} candles loaded. Volume is all zeros (expected).")
+        logger.info(f"{name} Cash Index: {len(price_df)} candles loaded. Volume is all zeros (expected).")
         constituents = self.get_active_constituents()
-        print(f"Building Synthetic Volume from {len(constituents)} Constituents starting exactly at {min_timestamp}...")
+        logger.info(f"Building Synthetic Volume from {len(constituents)} Constituents starting exactly at {min_timestamp}...")
         
         vol_df = self._fetch_constituent_volume(exact_fromdate=min_timestamp)
         
@@ -321,9 +325,9 @@ class DataFetcher:
             price_df['volume'] = price_df['synthetic_volume'].fillna(0).astype(int)
             price_df = price_df.drop(columns=['synthetic_volume'])
             price_df = price_df.reset_index()
-            print(f"Synthetic Volume injected! Avg volume per candle: {price_df['volume'].mean():.0f}")
+            logger.info(f"Synthetic Volume injected! Avg volume per candle: {price_df['volume'].mean():.0f}")
         else:
-            print("WARNING: Could not build synthetic volume. VFI/RVOL will be unreliable.")
+            logger.warning("WARNING: Could not build synthetic volume. VFI/RVOL will be unreliable.")
         
         return price_df
         

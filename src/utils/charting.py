@@ -3,6 +3,10 @@ import pandas as pd
 import mplfinance as mpf
 from datetime import timedelta
 
+from src.utils.logger import get_logger
+logger = get_logger("charting")
+
+
 def generate_trade_chart(df, t, exit_time, net_pl, result, filename):
     try:
         chart_df = df.copy()
@@ -18,7 +22,7 @@ def generate_trade_chart(df, t, exit_time, net_pl, result, filename):
         
         sliced_df = chart_df.loc[start_time:end_time]
         if sliced_df.empty:
-            print("Chart generation failed: No data in sliced timeframe.")
+            logger.info("Chart generation failed: No data in sliced timeframe.")
             return
             
         # Add-plots: VWAP, EMA_9, VFI
@@ -42,6 +46,6 @@ def generate_trade_chart(df, t, exit_time, net_pl, result, filename):
                  title=title, style=s, volume=False, 
                  savefig=dict(fname=out_path, dpi=120, bbox_inches='tight'))
                  
-        print(f"Chart saved to {out_path}")
+        logger.info(f"Chart saved to {out_path}")
     except Exception as e:
-        print(f"Error generating chart: {e}")
+        logger.error(f"Error generating chart: {e}")

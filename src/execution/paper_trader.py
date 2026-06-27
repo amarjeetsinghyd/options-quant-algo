@@ -6,6 +6,10 @@ from datetime import datetime, timedelta
 import pandas as pd
 from src.utils.charting import generate_trade_chart
 
+from src.utils.logger import get_logger
+logger = get_logger("paper_trader")
+
+
 class PaperTrader:
     def __init__(self, api, data_fetcher, history_list=None):
         self.api = api
@@ -26,7 +30,7 @@ class PaperTrader:
                     self.history_list = json.load(f)
                     self.trades_today = len([t for t in self.history_list if t.get('date', '').startswith(datetime.now().strftime('%d %b'))])
             except Exception as e:
-                print(f"Error loading history file: {e}")
+                logger.error(f"Error loading history file: {e}")
                 self.history_list = []
 
     def reset_daily(self):
@@ -62,7 +66,7 @@ class PaperTrader:
         # Find candidate option early so we can track its Order Flow
         opt_row, entry_price = self.select_option(signal["type"])
         if opt_row is None:
-            print("Sniper Aborted: Could not find option candidate in premium bounds.")
+            logger.info("Sniper Aborted: Could not find option candidate in premium bounds.")
             return
             
         signal["candidate_token"] = opt_row['token']
@@ -72,9 +76,9 @@ class PaperTrader:
         self.pending_setup = signal
         # Use current system time for the 3-minute expiration
         self.pending_setup["expiry_time"] = now + timedelta(minutes=3)
-        print(f"[{now.time()}] MASTER SETUP LOCKED: {signal['type']} | High: {signal['master_high']} | Low: {signal['master_low']}")
-        print(f"Selected Candidate: {signal['candidate_symbol']} at ₹{entry_price}")
-        print("Entering 3-Minute SNIPER MODE... Tracking Candidate Order Flow.")
+        logger.info(f"[{now.time()}] MASTER SETUP LOCKED: {signal['type']} | High: {signal['master_high']} | Low: {signal['master_low']}")
+        logger.info(f"Selected Candidate: {signal['candidate_symbol']} at ₹{entry_price}")
+        logger.info("Entering 3-Minute SNIPER MODE... Tracking Candidate Order Flow.")
 
     def sniper_hunt(self, live_ltp, current_nifty_df, order_flow_state):
         if not self.pending_setup:
@@ -85,7 +89,7 @@ class PaperTrader:
         
         # Check 3-Minute Expiration
         if now > setup["expiry_time"]:
-            print(f"[{now.time()}] SETUP ABORTED: 3 minutes passed without breakout.")
+            logger.info(f"[{now.time()}] SETUP ABORTED: 3 minutes passed without breakout.")
             self.pending_setup = None
             return
             
@@ -99,10 +103,10 @@ class PaperTrader:
         if triggered:
             delta = order_flow_state.get("delta", 0)
             if delta > 0:
-                print(f"!!! SNIPER TRIGGERED !!! Live price {live_ltp} broke Master Setup. Delta is POSITIVE ({delta}). Executing...")
+                logger.info(f"!!! SNIPER TRIGGERED !!! Live price {live_ltp} broke Master Setup. Delta is POSITIVE ({delta}). Executing...")
                 self._execute_trade(setup, current_nifty_df)
             else:
-                print(f"!!! FAKE BREAKOUT DETECTED !!! Live price {live_ltp} broke Master Setup, but Candidate Delta is NEGATIVE or FLAT ({delta}). Trade Aborted.")
+                logger.info(f"!!! FAKE BREAKOUT DETECTED !!! Live price {live_ltp} broke Master Setup, but Candidate Delta is NEGATIVE or FLAT ({delta}). Trade Aborted.")
                 self.pending_setup = None
 
     def select_option(self, signal_type):
@@ -154,7 +158,7 @@ class PaperTrader:
         strategy = setup.get('strategy', 'VWAP_BREAKOUT')
         
         if not token:
-            print("Sniper Aborted: No valid candidate token attached.")
+            logger.info("Sniper Aborted: No valid candidate token attached.")
             self.pending_setup = None
             return
             
@@ -164,7 +168,7 @@ class PaperTrader:
         opt_row_df = weekly_opts[weekly_opts['token'] == token]
         
         if opt_row_df.empty:
-            print("Sniper Aborted: Candidate token not found in chain.")
+            logger.info("Sniper Aborted: Candidate token not found in chain.")
             self.pending_setup = None
             return
             
@@ -249,9 +253,9 @@ class PaperTrader:
         
         self.trades_today += 1
         self.pending_setup = None
-        print(f"--- SNIPER TRADE EXECUTED ---")
-        print(f"Symbol: {symbol} (Target: ₹{target_price})")
-        print(f"---------------------------")
+        logger.info(f"--- SNIPER TRADE EXECUTED ---")
+        logger.info(f"Symbol: {symbol} (Target: ₹{target_price})")
+        logger.info(f"---------------------------")
         
     def manage_open_trade(self, live_ltp, current_nifty_df):
         if not self.current_trade:
@@ -292,7 +296,7 @@ class PaperTrader:
                     return
                 
         except Exception as e:
-            print(f"Error managing trade: {e}")
+            logger.error(f"Error managing trade: {e}")
 
     def _close_trade(self, exit_price, current_nifty_df, reason):
         exit_time = datetime.now()
@@ -370,10 +374,10 @@ class PaperTrader:
         with open(self.history_file, 'w', encoding='utf-8') as f:
             json.dump(self.history_list, f, indent=4)
         
-        print(f"--- TRADE CLOSED ---")
-        print(f"Result: {result} | P&L: ₹{round(net_pl, 2)}")
+        logger.info(f"--- TRADE CLOSED ---")
+        logger.info(f"Result: {result} | P&L: ₹{round(net_pl, 2)}")
         
         # Apply 30-Minute Cooldown Guardrail
         self.cooldown_until = datetime.now() + timedelta(minutes=30)
-        print(f"Entered 30-Minute Cooldown until {self.cooldown_until.strftime('%H:%M:%S')}")
+        logger.info(f"Entered 30-Minute Cooldown until {self.cooldown_until.strftime('%H:%M:%S')}")
         self.current_trade = None
