@@ -1,3 +1,15 @@
+# main.py
+# QuantOS UI Node — Flask Web Dashboard
+# Phase 6.2 — Lean Orchestration
+# Governed by: DOC-1.2 Engineering Optimization Roadmap (ASD v1)
+#
+# Scope: UI-only. Subscribes to Brain Service ZMQ events.
+#        Does NOT contain trading logic, ML, or data collection.
+#        Trading strategy (VFI + 9 EMA + VWAP) is preserved in brain_service.py
+#        Research data collection is handled by research_collector.py
+#
+# This file is intentionally lean. Do not add ML or execution logic here.
+
 import os
 import sys
 import json
