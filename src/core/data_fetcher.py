@@ -8,6 +8,16 @@ from datetime import datetime, timedelta
 from src.utils.logger import get_logger
 logger = get_logger("data_fetcher")
 
+# Rate limiter integration — prevents 403 errors before they happen
+try:
+    from src.core.rate_limiter import CANDLE_LIMITER, LTP_LIMITER, QUOTE_LIMITER, call_with_retry as _rl_call_with_retry
+    _RATE_LIMITER_AVAILABLE = True
+except ImportError:
+    _RATE_LIMITER_AVAILABLE = False
+    CANDLE_LIMITER = None
+    LTP_LIMITER = None
+    QUOTE_LIMITER = None
+
 
 MASTER_URL = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
 CACHE_FILE = "data/OpenAPIScripMaster.json"
