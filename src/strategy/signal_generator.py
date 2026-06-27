@@ -4,8 +4,10 @@ class SignalGenerator:
 
     def check_signal(self, df):
         """
-        Pure price-action breakout backed by institutional volume (VSA).
-        Finds the exact Master Setup Candle.
+        10-Minute Window Breakout Strategy.
+        Anchor: Price crosses VWAP.
+        Trigger: Price, 9 EMA, and VFI all align on the correct side within 10 minutes.
+        Filter: Momentum (Sum of bodies) must be in the trade direction.
         """
         if len(df) < 11:
             return None
@@ -14,11 +16,11 @@ class SignalGenerator:
         prev = df.iloc[-2]
         
         # --- Phase 1: The Alignment Trigger ---
-        call_aligned = latest['close'] > latest['vwap'] and latest['close'] > latest['ema_9'] and latest['vfi'] > 0
-        call_prev_aligned = prev['close'] > prev['vwap'] and prev['close'] > prev['ema_9'] and prev['vfi'] > 0
+        call_aligned = latest['close'] > latest['vwap'] and latest['ema_9'] > latest['vwap'] and latest['vfi'] > 0
+        call_prev_aligned = prev['close'] > prev['vwap'] and prev['ema_9'] > prev['vwap'] and prev['vfi'] > 0
         
-        put_aligned = latest['close'] < latest['vwap'] and latest['close'] < latest['ema_9'] and latest['vfi'] < 0
-        put_prev_aligned = prev['close'] < prev['vwap'] and prev['close'] < prev['ema_9'] and prev['vfi'] < 0
+        put_aligned = latest['close'] < latest['vwap'] and latest['ema_9'] < latest['vwap'] and latest['vfi'] < 0
+        put_prev_aligned = prev['close'] < prev['vwap'] and prev['ema_9'] < prev['vwap'] and prev['vfi'] < 0
         
         trigger_call = call_aligned and not call_prev_aligned
         trigger_put = put_aligned and not put_prev_aligned
@@ -43,32 +45,15 @@ class SignalGenerator:
             anchor_idx_loc = cross_up_window[cross_up_window].index[-1]
             analysis_window = df.loc[anchor_idx_loc:]
             
-            # 1. Institutional Presence (Flexible RVOL)
-            valid_vsa = analysis_window[(analysis_window['close'] > analysis_window['open']) & 
-                                        (analysis_window['rvol'] > 1.5) & 
-                                        (analysis_window['body_ratio'] >= 0.60)]
-            if valid_vsa.empty:
-                return None
-                
-            # 2. Window Momentum Check
-            anchor_candle = df.loc[anchor_idx_loc]
-            if len(analysis_window) > 1 and latest['close'] < anchor_candle['high']:
-                return None # Momentum faded
-                
-            # 3. Directional Dominance (Relative Candle Size)
-            largest_vol_idx = analysis_window['volume'].idxmax()
-            largest_candle = analysis_window.loc[largest_vol_idx]
-            if largest_candle['close'] <= largest_candle['open']:
-                return None # Largest volume was a red candle!
-                
+            # Momentum Check: Total Green Body must be greater than Total Red Body
             green_bodies = analysis_window[analysis_window['close'] > analysis_window['open']]['real_body']
             red_bodies = analysis_window[analysis_window['close'] < analysis_window['open']]['real_body']
             
             total_green_body = green_bodies.sum()
             total_red_body = red_bodies.sum()
             
-            if total_green_body < total_red_body:
-                return None # Red pullbacks are bigger than green pushes
+            if total_green_body <= total_red_body:
+                return None # Momentum failed
                 
             return {
                 "type": "CALL",
@@ -91,32 +76,15 @@ class SignalGenerator:
             anchor_idx_loc = cross_dn_window[cross_dn_window].index[-1]
             analysis_window = df.loc[anchor_idx_loc:]
             
-            # 1. Institutional Presence (Flexible RVOL)
-            valid_vsa = analysis_window[(analysis_window['close'] < analysis_window['open']) & 
-                                        (analysis_window['rvol'] > 1.5) & 
-                                        (analysis_window['body_ratio'] >= 0.60)]
-            if valid_vsa.empty:
-                return None
-                
-            # 2. Window Momentum Check
-            anchor_candle = df.loc[anchor_idx_loc]
-            if len(analysis_window) > 1 and latest['close'] > anchor_candle['low']:
-                return None # Momentum faded
-                
-            # 3. Directional Dominance (Relative Candle Size)
-            largest_vol_idx = analysis_window['volume'].idxmax()
-            largest_candle = analysis_window.loc[largest_vol_idx]
-            if largest_candle['close'] >= largest_candle['open']:
-                return None # Largest volume was a green candle!
-                
+            # Momentum Check: Total Red Body must be greater than Total Green Body
             green_bodies = analysis_window[analysis_window['close'] > analysis_window['open']]['real_body']
             red_bodies = analysis_window[analysis_window['close'] < analysis_window['open']]['real_body']
             
             total_green_body = green_bodies.sum()
             total_red_body = red_bodies.sum()
             
-            if total_red_body < total_green_body:
-                return None # Green pullbacks are bigger than red pushes
+            if total_red_body <= total_green_body:
+                return None # Momentum failed
                 
             return {
                 "type": "PUT",
@@ -130,8 +98,10 @@ class SignalGenerator:
 
     def check_rejection_signal(self, df):
         """
-        VWAP Mean Reversion (Rejection / Support) using 5-Minute Window Analysis.
-        Finds the exact Rejection Setup by anchoring to a VWAP wick touch and triggering on 9 EMA cross.
+        5-Minute Rejection Strategy.
+        Anchor: Wick touches VWAP but closes on the rejection side.
+        Trigger: Price crosses 9 EMA within 5 minutes.
+        Filter: Momentum (Sum of bodies) must be in the trade direction.
         """
         if len(df) < 6:
             return None
@@ -162,17 +132,7 @@ class SignalGenerator:
             anchor_idx_loc = anchor_window[anchor_window].index[-1]
             analysis_window = df.loc[anchor_idx_loc:]
             
-            # 1. Institutional Presence (Moderate effort to support)
-            valid_vsa = analysis_window[analysis_window['rvol'] > 1.2]
-            if valid_vsa.empty:
-                return None
-                
-            # 2. Directional Dominance (Total Body Method)
-            largest_vol_idx = analysis_window['volume'].idxmax()
-            largest_candle = analysis_window.loc[largest_vol_idx]
-            if largest_candle['close'] <= largest_candle['open']:
-                return None # Largest volume was a red candle!
-                
+            # Momentum Check: Total Green Body must be greater than Total Red Body
             green_bodies = analysis_window[analysis_window['close'] > analysis_window['open']]['real_body']
             red_bodies = analysis_window[analysis_window['close'] < analysis_window['open']]['real_body']
             
@@ -180,7 +140,7 @@ class SignalGenerator:
             total_red_body = red_bodies.sum()
             
             if total_green_body <= total_red_body:
-                return None # Red pullbacks are bigger than green pushes
+                return None # Momentum failed
                 
             return {
                 "type": "CALL",
@@ -200,17 +160,7 @@ class SignalGenerator:
             anchor_idx_loc = anchor_window[anchor_window].index[-1]
             analysis_window = df.loc[anchor_idx_loc:]
             
-            # 1. Institutional Presence (Moderate effort to reject)
-            valid_vsa = analysis_window[analysis_window['rvol'] > 1.2]
-            if valid_vsa.empty:
-                return None
-                
-            # 2. Directional Dominance (Total Body Method)
-            largest_vol_idx = analysis_window['volume'].idxmax()
-            largest_candle = analysis_window.loc[largest_vol_idx]
-            if largest_candle['close'] >= largest_candle['open']:
-                return None # Largest volume was a green candle!
-                
+            # Momentum Check: Total Red Body must be greater than Total Green Body
             green_bodies = analysis_window[analysis_window['close'] > analysis_window['open']]['real_body']
             red_bodies = analysis_window[analysis_window['close'] < analysis_window['open']]['real_body']
             
@@ -218,7 +168,7 @@ class SignalGenerator:
             total_red_body = red_bodies.sum()
             
             if total_red_body <= total_green_body:
-                return None # Green pullbacks are bigger than red pushes
+                return None # Momentum failed
                 
             return {
                 "type": "PUT",

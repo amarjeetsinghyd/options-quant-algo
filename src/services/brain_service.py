@@ -307,7 +307,9 @@ class BrainService:
                     was_trade = self.trader.current_trade is not None
                     
                     if self.trader.current_trade is None and self.trader.pending_setup is None:
-                        if now.hour < 15 or (now.hour == 15 and now.minute < 15):
+                        # TRADING WINDOW: 10:00 AM to 3:15 PM
+                        is_trading_window = (now.hour > 10 or (now.hour == 10 and now.minute >= 0)) and (now.hour < 15 or (now.hour == 15 and now.minute < 15))
+                        if is_trading_window:
                             signal = self.signal_gen.check_signal(self.current_df)
                             if not signal: signal = self.signal_gen.check_rejection_signal(self.current_df)
                                 

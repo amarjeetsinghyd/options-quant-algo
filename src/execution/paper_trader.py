@@ -286,14 +286,26 @@ class PaperTrader:
             closed_candles = current_nifty_df[current_nifty_df['timestamp'].dt.floor('min') < pd.Timestamp(now).floor('min')]
             
             if not closed_candles.empty:
-                last_closed_price = float(closed_candles.iloc[-1]['close'])
+                last_closed = closed_candles.iloc[-1]
+                ema_9 = float(last_closed['ema_9'])
+                vwap = float(last_closed['vwap'])
+                close_price = float(last_closed['close'])
                 
-                if t['type'] == "CALL" and last_closed_price < t["setup_low"]:
-                    self._close_trade(current_opt_price, current_nifty_df, "CANDLE SL: Closed Below Master Low")
-                    return
-                elif t['type'] == "PUT" and last_closed_price > t["setup_high"]:
-                    self._close_trade(current_opt_price, current_nifty_df, "CANDLE SL: Closed Above Master High")
-                    return
+                if t.get('strategy') == 'WINDOW_ALIGNMENT':
+                    if t['type'] == "CALL" and ema_9 < vwap:
+                        self._close_trade(current_opt_price, current_nifty_df, "CANDLE SL: 9 EMA Closed Below VWAP")
+                        return
+                    elif t['type'] == "PUT" and ema_9 > vwap:
+                        self._close_trade(current_opt_price, current_nifty_df, "CANDLE SL: 9 EMA Closed Above VWAP")
+                        return
+                        
+                elif t.get('strategy') == 'REJECTION_WINDOW':
+                    if t['type'] == "CALL" and close_price < vwap:
+                        self._close_trade(current_opt_price, current_nifty_df, "CANDLE SL: Price Closed Below VWAP")
+                        return
+                    elif t['type'] == "PUT" and close_price > vwap:
+                        self._close_trade(current_opt_price, current_nifty_df, "CANDLE SL: Price Closed Above VWAP")
+                        return
                 
         except Exception as e:
             logger.error(f"Error managing trade: {e}")

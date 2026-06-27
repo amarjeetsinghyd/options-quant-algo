@@ -1,3 +1,5 @@
+# Canonical Observation Dataset v3.1
+
 # Institutional Permanent Memory: Canonical Observation Dataset v3.1 (Frozen)
 
 This document is the final, frozen specification for the permanent observational memory architecture of the Scientific Research Institution. It serves as the definitive engineering reference for all future implementation.

@@ -19,8 +19,10 @@ import time
 import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional
+from datetime import datetime
 
 from src.utils.logger import get_logger
+from src.utils.market_calendar import is_trading_day
 
 logger = get_logger("start_all")
 
@@ -109,6 +111,13 @@ class ProcessSupervisor:
                     else:
                         del self.processes[name]
 
+            # Autonomous 4:00 PM Shutdown
+            now = datetime.now()
+            if now.hour >= 16:
+                logger.info("Market Closed (4:00 PM). Autonomous Shutdown Initiated.")
+                self.shutdown()
+                break
+
     def handle_restart(self, svc: Dict):
         """Restart a service if it hasn't exceeded max restarts."""
         name = svc["name"]
@@ -160,6 +169,11 @@ def main():
     logger.info("┌──────────────────────────────────────────────────────────────────────┐")
     logger.info("│      Options Quant Algo - Start All Services            │")
     logger.info("└──────────────────────────────────────────────────────────────────────┘")
+
+    # Autonomous Boot Check: Is it a trading day?
+    if not is_trading_day():
+        logger.info("Today is a weekend or public holiday. Engine remaining offline.")
+        sys.exit(0)
 
     # Register signal handlers
     signal.signal(signal.SIGINT, handle_shutdown)

@@ -30,6 +30,7 @@ class CanonicalCollector:
         self._stop_event = threading.Event()
         self._thread = None
         self._zmq_thread = None
+        self._heartbeat_thread = None
         
         # Raw Tick Buffers
         self._raw_buffers = {
@@ -72,6 +73,10 @@ class CanonicalCollector:
         
         self._thread = threading.Thread(target=self._run_loop, name="CanonicalFlusher", daemon=True)
         self._thread.start()
+        
+        self._heartbeat_thread = threading.Thread(target=self._heartbeat_loop, name="CanonicalHeartbeat", daemon=True)
+        self._heartbeat_thread.start()
+        
         logger.info(f"=== Canonical Observation Collector v3.1 Started ===")
 
     def stop(self):
@@ -79,6 +84,8 @@ class CanonicalCollector:
         self._stop_event.set()
         if self._thread:
             self._thread.join(timeout=30)
+        if self._heartbeat_thread:
+            self._heartbeat_thread.join(timeout=10)
         self.sub.close()
         logger.info("CanonicalCollector stopped.")
 
@@ -171,6 +178,30 @@ class CanonicalCollector:
         now = datetime.now()
         self._flush_canonical_snapshot(now)
         self._flush_raw_ticks(now)
+
+    def _heartbeat_loop(self):
+        """Tier 1: Live Heartbeat Monitor"""
+        while not self._stop_event.is_set():
+            # Wait for 5 minutes
+            for _ in range(60):
+                if self._stop_event.is_set(): return
+                time.sleep(5)
+                
+            now = datetime.now()
+            # If the market is open (09:15 to 15:30) and we haven't tracked a minute recently
+            if 9 <= now.hour <= 15:
+                if now.hour == 9 and now.minute < 15: continue
+                if now.hour == 15 and now.minute > 30: continue
+                
+                # Check if last_minute_tracked is within the last 5 minutes
+                # This simple check warns if the ZMQ stream is dead
+                diff = now.minute - self.last_minute_tracked
+                if diff < 0: diff += 60
+                
+                if diff > 5:
+                    logger.critical(f"HEALTH MONITOR [Tier 1]: NO DATA RECORDED for {diff} minutes! Is the ZMQ feed dead?")
+                else:
+                    logger.info("HEALTH MONITOR [Tier 1]: System is healthy. Data recording normally.")
 
     def _get_provenance_metadata(self):
         return {

@@ -25,46 +25,9 @@ if (!gotTheLock) {
         const logPath = path.join(__dirname, 'logs', 'electron_python.log');
         const logStream = fs.createWriteStream(logPath, { flags: 'a' });
         
-        // 1. Python Engine Management
-        // We spawn the engine natively and invisibly using child_process.spawn
-        let pythonProcess = null;
-        let isIntentionalQuit = false;
-
-        function startPythonBackend() {
-            logStream.write(`\n\n[${new Date().toISOString()}] Booting Python backend natively...\n`);
-            
-            let pythonExecutable = path.join(__dirname, 'venv', 'Scripts', 'pythonw.exe');
-            if (!fs.existsSync(pythonExecutable)) {
-                pythonExecutable = 'python';
-            }
-
-            pythonProcess = spawn(pythonExecutable, ['main.py'], {
-                cwd: __dirname,
-                windowsHide: true,
-                detached: true
-            });
-
-            pythonProcess.unref();
-
-            pythonProcess.stdout.on('data', (data) => {
-                logStream.write(`[PYTHON] ${data}`);
-            });
-
-            pythonProcess.stderr.on('data', (data) => {
-                logStream.write(`[PYTHON ERROR] ${data}`);
-            });
-
-            pythonProcess.on('close', (code, signal) => {
-                logStream.write(`[PYTHON] Process exited with code ${code} and signal ${signal}\n`);
-                if (!isIntentionalQuit) {
-                    logStream.write(`[PYTHON] Unexpected crash detected. Auto-restarting in 2 seconds...\n`);
-                    setTimeout(startPythonBackend, 2000);
-                }
-            });
-        }
-
-        // Start it for the first time
-        startPythonBackend();
+        // 1. Python Engine Management (REMOVED)
+        // The engine now runs autonomously. The UI is just a dumb viewer.
+        // It does not spawn or kill the python backend.
 
         // 2. Create the Desktop Window
         mainWindow = new BrowserWindow({
@@ -141,19 +104,9 @@ if (!gotTheLock) {
                 } 
             },
             {
-                label: 'Quit Algo Completely (Stop Trading)',
+                label: 'Quit UI (Leaves Engine Running)',
                 click: () => {
                     app.isQuitting = true;
-                    isIntentionalQuit = true;
-                    if (pythonProcess) {
-                        try {
-                            process.kill(-pythonProcess.pid); // Kill process tree if detached
-                        } catch (e) {
-                            try {
-                                pythonProcess.kill('SIGINT');
-                            } catch(e2) {}
-                        }
-                    }
                     app.quit();
                 } 
             }

@@ -78,6 +78,10 @@ def start_zmq_listener():
 def index():
     return render_template('index.html')
 
+@app.route('/intelligence_lab')
+def intelligence_lab():
+    return render_template('intelligence_lab.html')
+
 @app.route('/api/status')
 def get_status():
     return jsonify(state)
