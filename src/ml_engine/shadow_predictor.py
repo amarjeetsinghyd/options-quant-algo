@@ -34,8 +34,8 @@ class ShadowPredictor:
             # 1. Leakage Protection Check
             LeakageDetector.validate_features(features, datetime.now())
             
-            # 2. Run Predictions
-            model_names = ["LightGBM", "XGBoost", "RandomForest", "CatBoost"]
+            # 2. Run Predictions (XGBoost Only)
+            model_names = ["XGBoost"]
             predictions = {}
             
             for model in model_names:
@@ -53,18 +53,6 @@ class ShadowPredictor:
                     "expected_time": raw_preds["expected_time"],
                     "confidence_score": cal_10_prob # Base confidence on 10% target
                 }
-                
-            # 3. Calculate Ensemble Score
-            ensemble_inputs = {m: p["gamma_10_probability"] for m, p in predictions.items()}
-            final_gamma_score = self.ensemble.compute_final_gamma_score(ensemble_inputs)
-            
-            predictions["Ensemble"] = {
-                "gamma_5_probability": sum([p["gamma_5_probability"] for p in predictions.values()]) / len(predictions),
-                "gamma_10_probability": final_gamma_score,
-                "gamma_20_probability": sum([p["gamma_20_probability"] for p in predictions.values()]) / len(predictions),
-                "expected_time": 120.0,
-                "confidence_score": final_gamma_score
-            }
             
             # 4. Save to Database
             local_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

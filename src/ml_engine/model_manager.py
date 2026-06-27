@@ -24,10 +24,7 @@ class ModelManager:
         """Loads available models from the models directory."""
         os.makedirs(MODELS_DIR, exist_ok=True)
         model_files = {
-            "RandomForest": "randomforest_v1.pkl",
-            "XGBoost": "xgboost_v1.pkl",
-            "LightGBM": "lightgbm_v1.pkl",
-            "CatBoost": "catboost_v1.pkl"
+            "XGBoost": "xgboost_v1.pkl"
         }
         
         for name, filename in model_files.items():
