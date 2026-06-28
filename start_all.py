@@ -58,6 +58,11 @@ SERVICES = [
         "command": [sys.executable, "src/services/health_service.py"],
         "restart_on_failure": True,
     },
+    {
+        "name": "decision_journal",
+        "command": [sys.executable, "src/services/decision_journal.py"],
+        "restart_on_failure": True,
+    },
 ]
 
 RESTART_DELAY_SECONDS = 5
