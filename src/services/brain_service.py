@@ -310,9 +310,15 @@ class BrainService:
                         # TRADING WINDOW: 10:00 AM to 3:15 PM
                         is_trading_window = (now.hour > 10 or (now.hour == 10 and now.minute >= 0)) and (now.hour < 15 or (now.hour == 15 and now.minute < 15))
                         if is_trading_window:
-                            signal, decision_state = self.signal_gen.check_signal(self.current_df)
-                            if not signal: 
-                                signal, decision_state = self.signal_gen.check_rejection_signal(self.current_df)
+                            if self.trader.cooldown_until and now < self.trader.cooldown_until:
+                                signal, decision_state = None, {
+                                    "human_reason": f"Active Cooldown until {self.trader.cooldown_until.strftime('%H:%M:%S')}",
+                                    "machine_state": {}
+                                }
+                            else:
+                                signal, decision_state = self.signal_gen.check_signal(self.current_df)
+                                if not signal: 
+                                    signal, decision_state = self.signal_gen.check_rejection_signal(self.current_df)
                                 
                             latest = self.current_df.iloc[-1]
                             observation_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, str(latest['timestamp'])))

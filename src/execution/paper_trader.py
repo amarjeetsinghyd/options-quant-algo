@@ -28,7 +28,19 @@ class PaperTrader:
             try:
                 with open(self.history_file, 'r', encoding='utf-8') as f:
                     self.history_list = json.load(f)
-                    self.trades_today = len([t for t in self.history_list if t.get('date', '').startswith(datetime.now().strftime('%d %b'))])
+                    today_str = datetime.now().strftime('%d %b')
+                    today_trades = [t for t in self.history_list if t.get('date', '').startswith(today_str)]
+                    self.trades_today = len(today_trades)
+                    
+                    if today_trades:
+                        last_trade = today_trades[-1]
+                        last_time_str = last_trade.get('date')
+                        if last_time_str:
+                            curr_year = datetime.now().year
+                            last_trade_time = datetime.strptime(f"{last_time_str} {curr_year}", '%d %b %H:%M:%S %Y')
+                            self.cooldown_until = last_trade_time + timedelta(minutes=30)
+                            if self.cooldown_until < datetime.now():
+                                self.cooldown_until = None
             except Exception as e:
                 logger.error(f"Error loading history file: {e}")
                 self.history_list = []
