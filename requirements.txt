@@ -10,3 +10,4 @@ pyzmq
 polars
 pyarrow
 numpy
+psutil

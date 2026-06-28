@@ -53,6 +53,11 @@ SERVICES = [
         "command": [sys.executable, "main.py"],
         "restart_on_failure": True,
     },
+    {
+        "name": "health_monitor",
+        "command": [sys.executable, "src/services/health_service.py"],
+        "restart_on_failure": True,
+    },
 ]
 
 RESTART_DELAY_SECONDS = 5
