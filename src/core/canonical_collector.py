@@ -228,7 +228,9 @@ class CanonicalCollector:
                     self.market_state[cat][tk]["high"] = last_close
                     self.market_state[cat][tk]["low"] = last_close
 
-        obs_uuid = str(uuid.uuid4())
+        # Generate the exact same UUID5 as the BrainService does, based on pandas timestamp string
+        ts_str = str(pd.Timestamp(timestamp.replace(second=0, microsecond=0)))
+        obs_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, ts_str))
         date_str = timestamp.strftime("%Y/%m/%d")
         time_str = timestamp.strftime("%H:%M:00") # Lock to the minute boundary
         

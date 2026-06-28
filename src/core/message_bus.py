@@ -75,23 +75,26 @@ class MessageBusSubscriber:
         Blocking loop that listens for messages and fires the callback.
         callback signature: callback(topic: str, payload: dict)
         """
-        # Set a timeout so we can check the stop event
-        self.socket.setsockopt(zmq.RCVTIMEO, 1000)
+        poller = zmq.Poller()
+        poller.register(self.socket, zmq.POLLIN)
         
         while not self._stop_event.is_set():
             try:
-                # Read multipart message (envelope + payload)
-                topic = self.socket.recv_string()
-                payload_str = self.socket.recv_string()
+                socks = dict(poller.poll(1000))  # 1000ms timeout
                 
-                payload = json.loads(payload_str)
-                callback(topic, payload)
-                
-            except zmq.Again:
-                # Timeout reached, just loop and check stop_event
-                continue
+                if self.socket in socks and socks[self.socket] == zmq.POLLIN:
+                    # Read multipart message (envelope + payload)
+                    # Use NOBLOCK since we know data is ready, preventing any edge-case blocking
+                    topic = self.socket.recv_string(flags=zmq.NOBLOCK)
+                    payload_str = self.socket.recv_string(flags=zmq.NOBLOCK)
+                    
+                    payload = json.loads(payload_str)
+                    callback(topic, payload)
+                    
             except Exception as e:
-                logger.error(f"[ZMQ] Error in subscriber loop: {e}")
+                # Ignore Again if NOBLOCK somehow triggers it, otherwise log
+                if not isinstance(e, zmq.Again):
+                    logger.error(f"[ZMQ] Error in subscriber loop: {e}")
 
     def stop(self):
         self._stop_event.set()
