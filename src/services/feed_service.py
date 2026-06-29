@@ -32,6 +32,7 @@ class FeedService:
         self.deriv_exch_type = 2 if self.anchor_exch == "NSE" else 4
         
         self.eq_tokens = [self.anchor_token]
+        self.eq_tokens.append("99926017") # INDIA VIX
         self.deriv_tokens = []
         
         # 1. Futures

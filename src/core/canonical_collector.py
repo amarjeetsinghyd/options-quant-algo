@@ -95,7 +95,7 @@ class CanonicalCollector:
             return "options"
         elif symbol.endswith("FUT"):
             return "futures"
-        elif token in ["26000", "26009"]: # NIFTY, BANKNIFTY spot
+        elif token in ["26000", "26009", "99926017"]: # NIFTY, BANKNIFTY spot, INDIA VIX
             return "underlying"
         else:
             return "constituents"
@@ -111,7 +111,7 @@ class CanonicalCollector:
                 if not symbol:
                     # In some feeds symbol isn't provided directly, infer category best effort
                     category = "options" if int(token) > 30000 else "constituents"
-                    if token == "26000": category = "underlying"
+                    if token in ["26000", "99926017"]: category = "underlying"
                 else:
                     category = self._get_category(token, symbol)
                 
