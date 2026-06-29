@@ -230,7 +230,7 @@ class PaperTrader:
             greek_res = self.api.optionGreek({"name": name, "expirydate": expiry})
             if greek_res and greek_res.get('status') and greek_res.get('data'):
                 for item in greek_res['data']:
-                    if str(item.get('strikePrice', '')) == str(strike) and item.get('optionType') == ("CE" if setup["type"]=="CALL" else "PE"):
+                    if str(item.get('strikePrice', '')) == str(int(strike)) and item.get('optionType') == ("CE" if setup["type"]=="CALL" else "PE"):
                         greeks["delta"] = item.get('delta', 0.0)
                         greeks["gamma"] = item.get('gamma', 0.0)
                         greeks["theta"] = item.get('theta', 0.0)

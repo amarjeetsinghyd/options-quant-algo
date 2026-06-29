@@ -79,7 +79,7 @@ class SignalGenerator:
                 "strategy": "WINDOW_ALIGNMENT",
                 "master_high": float(latest['high']),
                 "master_low": float(latest['low']),
-                "timestamp": latest['timestamp']
+                "timestamp": latest['timestamp'].isoformat() if hasattr(latest['timestamp'], 'isoformat') else str(latest['timestamp'])
             }
             return signal, decision_state
             
@@ -120,7 +120,7 @@ class SignalGenerator:
                 "strategy": "WINDOW_ALIGNMENT",
                 "master_high": float(latest['high']),
                 "master_low": float(latest['low']),
-                "timestamp": latest['timestamp']
+                "timestamp": latest['timestamp'].isoformat() if hasattr(latest['timestamp'], 'isoformat') else str(latest['timestamp'])
             }
             return signal, decision_state
             
@@ -195,7 +195,7 @@ class SignalGenerator:
                 "strategy": "REJECTION_WINDOW",
                 "master_high": float(latest['high']),
                 "master_low": float(latest['low']),
-                "timestamp": latest['timestamp']
+                "timestamp": latest['timestamp'].isoformat() if hasattr(latest['timestamp'], 'isoformat') else str(latest['timestamp'])
             }
             return signal, decision_state
             
@@ -234,7 +234,7 @@ class SignalGenerator:
                 "strategy": "REJECTION_WINDOW",
                 "master_high": float(latest['high']),
                 "master_low": float(latest['low']),
-                "timestamp": latest['timestamp']
+                "timestamp": latest['timestamp'].isoformat() if hasattr(latest['timestamp'], 'isoformat') else str(latest['timestamp'])
             }
             return signal, decision_state
             

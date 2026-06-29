@@ -20,12 +20,14 @@ def append_all_indicators(df_pandas):
     if df_pandas.empty or len(df_pandas) < 130:
         return df_pandas # Not enough data
         
+    # Extract date and time using Pandas to avoid Polars +05:30 timezone parse errors
+    df_pandas['date'] = pd.to_datetime(df_pandas['timestamp']).dt.date
+    df_pandas['time'] = pd.to_datetime(df_pandas['timestamp']).dt.time
+    
     df = pl.from_pandas(df_pandas)
     
     # Pre-computations
     df = df.with_columns(
-        pl.col('timestamp').dt.date().alias('date'),
-        pl.col('timestamp').dt.time().alias('time'),
         ((pl.col('high') + pl.col('low') + pl.col('close')) / 3).alias('typical_price')
     )
     

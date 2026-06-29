@@ -193,7 +193,7 @@ class DataFetcher:
                 return api_func(*args, **kwargs)
             except Exception as e:
                 err_msg = str(e)
-                if "exceeding access rate" in err_msg or "Access denied" in err_msg or "rate limit" in err_msg.lower():
+                if "exceeding access rate" in err_msg or "Access denied" in err_msg or "rate limit" in err_msg.lower() or "too many requests" in err_msg.lower() or "ab1021" in err_msg.lower():
                     # Back off and try again
                     if attempt < max_retries - 1:
                         logger.info(f"    API Rate Limit hit (attempt {attempt+1}/{max_retries}). Retrying in {delay:.1f}s...")
@@ -228,7 +228,6 @@ class DataFetcher:
         # Determine the exchange segment dynamically based on active instrument
         name, _ = self.get_active_instrument()
         exchange = "NSE" if name == "NIFTY" else "BSE"
-        
         all_volumes = None
         fetched_count = 0
         
@@ -256,8 +255,8 @@ class DataFetcher:
                     
                     fetched_count += 1
                     
-                # Sleep 400ms between calls (2.5 req/sec) to stay under strict 3 req/sec rate limit
-                time.sleep(0.4)
+                # Sleep 1000ms between calls (1 req/sec) to stay well under strict 3 req/sec rate limit
+                time.sleep(1.0)
                 
             except Exception as e:
                 logger.warning(f"  Warning: Could not fetch volume for {stock_name}: {e}")

@@ -23,6 +23,14 @@ from src.utils.logger import get_logger
 logger = get_logger("ui_node")
 
 app = Flask(__name__, template_folder='src/web/templates', static_folder='src/web/static')
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+
+@app.after_request
+def add_header(response):
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, post-check=0, pre-check=0, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '-1'
+    return response
 
 # Load history if exists
 history_data = []
@@ -40,7 +48,8 @@ state = {
     "active_trade": None,
     "history": history_data,
     "chart_data": [],
-    "errors": []
+    "errors": [],
+    "decisions": []
 }
 
 def on_exec_message(topic, payload):
@@ -67,6 +76,12 @@ def on_exec_message(topic, payload):
             
     elif topic == "EXEC.CHART_SYNC":
         state["chart_data"] = payload
+
+    elif topic == "EXEC.DECISION":
+        # Keep last 100 decisions in memory
+        state["decisions"].insert(0, payload)
+        if len(state["decisions"]) > 100:
+            state["decisions"] = state["decisions"][:100]
 
 def start_zmq_listener():
     """Background thread that listens to Brain Service events."""
@@ -125,6 +140,121 @@ def chart_data():
         return app.response_class(json_data, mimetype='application/json')
     except Exception as e:
         return jsonify({"error": str(e)})
+
+@app.route('/api/intelligence/health')
+def intel_health():
+    """Reads the health_state.json written by health_service.py"""
+    try:
+        health_path = os.path.join(os.path.dirname(__file__), 'data', 'health_state.json')
+        if os.path.exists(health_path):
+            with open(health_path, 'r') as f:
+                data = json.load(f)
+            return jsonify(data.get('latest', {}))
+        return jsonify({"error": "Health data not yet available"})
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route('/api/intelligence/decisions')
+def intel_decisions():
+    """Returns decision statistics + recent decisions from in-memory buffer and parquet history"""
+    try:
+        # In-memory recent decisions (last 100)
+        recent = state.get('decisions', [])
+        
+        # Also try to get today's totals from parquet
+        total = 0
+        accepted = 0
+        rejected = 0
+        reasons = {}
+        
+        parquet_path = os.path.join(os.path.dirname(__file__), 'data', 'decision_history.parquet')
+        if os.path.exists(parquet_path):
+            try:
+                df = pd.read_parquet(parquet_path)
+                today_str = datetime.now().strftime('%Y-%m-%d')
+                today_df = df[df['timestamp'].astype(str).str.startswith(today_str)]
+                total = len(today_df)
+                accepted = int((today_df['status'] == 'ACCEPTED').sum())
+                rejected = int((today_df['status'] == 'REJECTED').sum())
+                # Top rejection reasons
+                rej_df = today_df[today_df['status'] == 'REJECTED']
+                if not rej_df.empty:
+                    rc = rej_df['human_reason'].value_counts().head(5)
+                    reasons = {str(k): int(v) for k, v in rc.items()}
+            except Exception as e:
+                logger.warning(f"Could not read decision parquet: {e}")
+        
+        return jsonify({
+            'total_today': total,
+            'accepted_today': accepted,
+            'rejected_today': rejected,
+            'rejection_reasons': reasons,
+            'recent': recent[:20]
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)})
+
+@app.route('/api/intelligence/live_state')
+def intel_live_state():
+    """Returns the current computed market indicators from the latest telemetry"""
+    try:
+        telemetry = state.get('telemetry', {})
+        chart = state.get('chart_data', [])
+        
+        # Get latest candle indicators if chart data available
+        market_regime = None
+        atr = None
+        atr_expansion = None
+        compression = None
+        
+        if chart:
+            latest = chart[-1] if isinstance(chart, list) else {}
+            market_regime = latest.get('market_regime')
+            atr = latest.get('atr')
+            atr_expansion = latest.get('atr_expansion')
+            compression = latest.get('compression')
+        
+        return jsonify({
+            'telemetry': telemetry,
+            'market_regime': market_regime,
+            'atr': atr,
+            'atr_expansion': atr_expansion,
+            'compression': compression
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)})
+
+@app.route('/api/intelligence/order_flow')
+def intel_order_flow():
+    """Returns the active setup / trade order flow state from in-memory state"""
+    try:
+        active = state.get('active_trade')
+        return jsonify({
+            'active_trade': active,
+            'has_active': active is not None
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)})
+
+@app.route('/api/intelligence/trades')
+def intel_trades():
+    """Returns trade history"""
+    try:
+        history = state.get('history', [])
+        # Calculate summary stats
+        wins = sum(1 for t in history if t.get('result') == 'WIN')
+        losses = sum(1 for t in history if t.get('result') == 'LOSS')
+        total_pl = sum(float(t.get('net_pl', 0)) for t in history)
+        
+        return jsonify({
+            'history': history[:50],  # Last 50 trades
+            'total_trades': len(history),
+            'wins': wins,
+            'losses': losses,
+            'total_pl': round(total_pl, 2)
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)})
 
 if __name__ == '__main__':
     # Start the background subscriber

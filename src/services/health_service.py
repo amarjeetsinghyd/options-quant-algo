@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 
 from src.core.message_bus import FEED_PORT, EXEC_PORT
 from src.utils.logger import get_logger
-from src.utils.market_calendar import is_market_open
+from src.utils.market_calendar import is_trading_day
 
 logger = get_logger("health_service")
 
@@ -40,7 +40,7 @@ class PassiveHealthMonitor:
         self.history = deque(maxlen=60) # Keep 60 snapshots in JSON
         
         self.data_dir = Path(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../data')))
-        self.canonical_dir = self.data_dir / "canonical"
+        self.canonical_dir = self.data_dir / "institutional_memory" / "canonical_observations" / "constituents_state"
         
         self.data_dir.mkdir(exist_ok=True, parents=True)
         
@@ -90,7 +90,7 @@ class PassiveHealthMonitor:
         if not self.canonical_dir.exists():
             return {"status": "Warning", "last_flush": None, "total_files": 0, "total_size_mb": 0}
             
-        parquet_files = list(self.canonical_dir.glob("*.parquet"))
+        parquet_files = list(self.canonical_dir.glob("**/*.parquet"))
         if not parquet_files:
             return {"status": "Warning", "last_flush": None, "total_files": 0, "total_size_mb": 0}
             
@@ -101,7 +101,7 @@ class PassiveHealthMonitor:
         
         now = datetime.now()
         status = "Healthy"
-        if is_market_open() and (now - mtime).total_seconds() > 300: # 5 mins
+        if is_trading_day() and (now - mtime).total_seconds() > 300: # 5 mins
             status = "Warning"
             
         return {
@@ -127,7 +127,7 @@ class PassiveHealthMonitor:
         if brain_info['status'] == 'Critical': score -= 25
         if research_info['status'] == 'Critical': score -= 20
         
-        if is_market_open():
+        if is_trading_day():
             if tick_rate == 0 and feed_info['status'] != 'Critical':
                 score -= 20
             if canonical_info['status'] == 'Warning':
@@ -153,7 +153,7 @@ class PassiveHealthMonitor:
         snapshot = {
             "timestamp": datetime.now().isoformat(),
             "health_score": score,
-            "is_market_open": is_market_open(),
+            "is_trading_day": is_trading_day(),
             "feed_service": {
                 **feed_info,
                 "last_tick": self.last_tick_time,

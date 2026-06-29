@@ -394,6 +394,7 @@ class GammaEventCollector:
                         liquidity_score, spread_before_event,
                         session_type, data_source, quality_score, connection_quality,
                         observation_status, observation_version, exchange_timestamp,
+                        local_timestamp, latency_ms, market_state
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
             params = (

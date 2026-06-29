@@ -3,7 +3,7 @@ import os
 from datetime import datetime
 
 from src.utils.logger import get_logger
-logger = get_logger("nightly_validator")
+logger = get_logger("eod_validator")
 from src.utils.instrumentation import get_db_connection
 from src.config.engineering_config import ML_DB_PATH, STRIKE_DB_PATH
 

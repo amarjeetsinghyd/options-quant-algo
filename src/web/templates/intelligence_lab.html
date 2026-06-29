@@ -4,479 +4,653 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Intelligence Lab | Quant Terminal</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=1.1">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/intelligence_lab.css') }}?v=1.1">
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Inter:wght@400;600&display=swap" rel="stylesheet">
-    <!-- Ionicons for modern icons -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=2.0">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
     <script type="module" src="https://unpkg.com/ionicons@7.1.0/dist/ionicons/ionicons.esm.js"></script>
     <script nomodule src="https://unpkg.com/ionicons@7.1.0/dist/ionicons/ionicons.js"></script>
-    <!-- Lightweight Charts for simple charting -->
-    <script src="{{ url_for('static', filename='lightweight-charts.min.js') }}"></script>
-    <!-- Chart.js for Pie and Bar charts -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+
+        :root {
+            --bg: #020617;
+            --bg2: rgba(15, 23, 42, 0.6);
+            --card: rgba(30, 41, 59, 0.4);
+            --card2: rgba(15, 23, 42, 0.4);
+            --border: rgba(255,255,255,0.06);
+            --border2: rgba(255,255,255,0.12);
+            --text: #f8fafc;
+            --text2: #94a3b8;
+            --text3: #64748b;
+            --primary: #3b82f6;
+            --success: #10b981;
+            --success-glow: rgba(16,185,129,0.4);
+            --danger: #ef4444;
+            --danger-glow: rgba(239,68,68,0.4);
+            --warning: #f59e0b;
+            --accent: #8b5cf6;
+            --cyan: #06b6d4;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: var(--bg);
+            background-image: 
+                radial-gradient(circle at 15% 50%, rgba(59, 130, 246, 0.08), transparent 25%),
+                radial-gradient(circle at 85% 30%, rgba(139, 92, 246, 0.08), transparent 25%);
+            background-attachment: fixed;
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        .mono { font-family: 'JetBrains Mono', monospace; }
+
+        /* NAV */
+        .top-nav {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 32px;
+            background: rgba(15, 23, 42, 0.6);
+            backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .nav-brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 20px;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+        }
+        .nav-brand span { 
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .nav-brand ion-icon { color: var(--primary); font-size: 24px; filter: drop-shadow(0 0 8px var(--primary)); }
+        .nav-controls { display: flex; align-items: center; gap: 12px; }
+        .nav-btn {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            border-radius: 8px;
+            border: 1px solid var(--border2);
+            background: rgba(255,255,255,0.03);
+            color: var(--text);
+            font-family: 'Outfit', sans-serif;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .nav-btn:hover { 
+            background: rgba(255,255,255,0.08); 
+            border-color: var(--primary);
+            box-shadow: 0 0 12px rgba(59,130,246,0.3);
+            transform: translateY(-1px);
+        }
+
+        /* LAYOUT */
+        .lab-body {
+            padding: 32px;
+            max-width: 1600px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        /* SCORE BANNER */
+        .health-banner {
+            display: grid;
+            grid-template-columns: auto 1fr 1fr 1fr 1fr 1fr;
+            gap: 24px;
+            background: var(--card);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 24px 32px;
+            align-items: center;
+            box-shadow: 0 4px 24px -4px rgba(0,0,0,0.5);
+            transition: transform 0.3s ease;
+        }
+        .health-banner:hover { transform: translateY(-2px); }
+        .health-score-box {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 96px;
+            height: 96px;
+            border-radius: 50%;
+            border: 3px solid var(--success);
+            box-shadow: 0 0 16px var(--success-glow), inset 0 0 16px var(--success-glow);
+            position: relative;
+        }
+        .health-score-val { font-size: 32px; font-weight: 800; line-height: 1; text-shadow: 0 0 10px rgba(255,255,255,0.3); }
+        .health-score-lbl { font-size: 9px; font-weight: 700; letter-spacing: 1.5px; color: var(--text2); text-transform: uppercase; margin-top: 4px; }
+        
+        .health-stat { display: flex; flex-direction: column; gap: 6px; border-left: 1px solid var(--border); padding-left: 20px; }
+        .health-stat-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--text3); }
+        .health-stat-val { font-size: 16px; font-weight: 700; color: var(--text); }
+        .health-stat-sub { font-size: 12px; color: var(--text2); font-family: 'JetBrains Mono', monospace; opacity: 0.8; }
+        
+        .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+        .dot-green { background: var(--success); box-shadow: 0 0 8px var(--success); animation: pulse 2s infinite; }
+        .dot-red { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+        .dot-yellow { background: var(--warning); box-shadow: 0 0 8px var(--warning); }
+
+        /* GRID */
+        .panel-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+        .panel-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 24px; }
+
+        /* CARD */
+        .card {
+            background: var(--card);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 4px 20px -4px rgba(0,0,0,0.3);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .card:hover { border-color: var(--border2); transform: translateY(-2px); box-shadow: 0 8px 30px -4px rgba(0,0,0,0.4); }
+        
+        .card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 18px 24px;
+            border-bottom: 1px solid var(--border);
+            background: rgba(0,0,0,0.2);
+        }
+        .card-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 13px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text2);
+        }
+        .card-title ion-icon { color: var(--primary); font-size: 18px; }
+        .card-body { padding: 24px; }
+
+        /* METRIC ROWS */
+        .metric-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); transition: background 0.2s; }
+        .metric-row:hover { background: rgba(255,255,255,0.02); padding-left: 8px; padding-right: 8px; border-radius: 6px; }
+        .metric-row:last-child { border-bottom: none; }
+        .metric-key { font-size: 12px; color: var(--text2); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+        .metric-val { font-size: 14px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+
+        /* BIG STAT */
+        .big-stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; padding: 24px; }
+        .big-stat {
+            text-align: center;
+            background: linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0) 100%);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px 16px;
+            transition: all 0.3s;
+        }
+        .big-stat:hover { border-color: rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); }
+        .big-stat-num { font-size: 36px; font-weight: 800; line-height: 1; font-family: 'JetBrains Mono', monospace; background: linear-gradient(135deg, #fff, #94a3b8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .big-stat-label { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: 1px; margin-top: 10px; font-weight: 700; }
+
+        /* DECISION STREAM */
+        .decision-feed { display: flex; flex-direction: column; gap: 8px; padding: 16px; max-height: 360px; overflow-y: auto; }
+        .decision-feed::-webkit-scrollbar { width: 6px; }
+        .decision-feed::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 6px; }
+        .decision-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 14px;
+            border-radius: 10px;
+            background: rgba(0,0,0,0.2);
+            border: 1px solid var(--border);
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+        .decision-item:hover { transform: translateX(4px); background: rgba(255,255,255,0.03); }
+        .decision-item.accepted { border-left: 4px solid var(--success); box-shadow: -2px 0 10px var(--success-glow); }
+        .decision-item.rejected { border-left: 4px solid var(--text3); }
+        .decision-time { color: var(--text3); font-family: 'JetBrains Mono', monospace; min-width: 65px; font-size: 11px; }
+        .decision-action { font-weight: 800; min-width: 45px; }
+        .decision-reason { color: var(--text2); font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        
+        .badge { padding: 4px 10px; border-radius: 6px; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; }
+        .badge-green { background: rgba(16,185,129,0.15); color: var(--success); box-shadow: 0 0 10px rgba(16,185,129,0.1); }
+        .badge-gray { background: rgba(100,116,139,0.15); color: var(--text3); }
+        .badge-blue { background: rgba(59,130,246,0.15); color: var(--primary); }
+        .badge-red { background: rgba(239,68,68,0.15); color: var(--danger); box-shadow: 0 0 10px rgba(239,68,68,0.1); }
+        .badge-yellow { background: rgba(245,158,11,0.15); color: var(--warning); box-shadow: 0 0 10px rgba(245,158,11,0.1); }
+        .badge-purple { background: rgba(139,92,246,0.15); color: var(--accent); }
+
+        /* REASON BARS */
+        .reason-bars { padding: 20px 24px; display: flex; flex-direction: column; gap: 14px; }
+        .reason-bar-item { display: flex; flex-direction: column; gap: 6px; }
+        .reason-bar-label { font-size: 12px; color: var(--text2); display: flex; justify-content: space-between; font-weight: 600; }
+        .reason-bar-track { height: 6px; background: rgba(0,0,0,0.3); border-radius: 6px; overflow: hidden; box-shadow: inset 0 1px 3px rgba(0,0,0,0.5); }
+        .reason-bar-fill { height: 100%; background: linear-gradient(90deg, #3b82f6, #06b6d4); border-radius: 6px; transition: width 1s cubic-bezier(0.4, 0, 0.2, 1); }
+
+        /* LIVE STATE GRID */
+        .live-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; padding: 24px; }
+        .live-tile {
+            background: linear-gradient(135deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0) 100%);
+            border-radius: 12px;
+            padding: 16px 20px;
+            border: 1px solid var(--border);
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+        .live-tile::before { content: ""; position: absolute; top: 0; left: 0; width: 100%; height: 2px; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent); opacity: 0; transition: opacity 0.3s; }
+        .live-tile:hover { transform: translateY(-2px); border-color: rgba(255,255,255,0.15); background: rgba(255,255,255,0.05); }
+        .live-tile:hover::before { opacity: 1; }
+        .live-tile-label { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: 1px; font-weight: 700; }
+        .live-tile-val { font-size: 24px; font-weight: 800; margin-top: 6px; font-family: 'JetBrains Mono', monospace; text-shadow: 0 2px 10px rgba(0,0,0,0.5); }
+        .live-tile-sub { font-size: 12px; color: var(--text2); margin-top: 4px; font-weight: 500; }
+
+        /* ORDER FLOW */
+        .flow-gauge { padding: 24px; display: flex; flex-direction: column; gap: 18px; }
+        .flow-row { display: flex; align-items: center; gap: 16px; }
+        .flow-label { font-size: 12px; color: var(--text2); min-width: 90px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
+        .flow-bar-track { flex: 1; height: 10px; background: rgba(0,0,0,0.3); border-radius: 10px; overflow: hidden; box-shadow: inset 0 2px 4px rgba(0,0,0,0.5); }
+        .flow-bar-fill-buy { height: 100%; background: linear-gradient(90deg, #059669, #10b981); border-radius: 10px; transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 0 10px var(--success-glow); }
+        .flow-bar-fill-sell { height: 100%; background: linear-gradient(90deg, #dc2626, #ef4444); border-radius: 10px; transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 0 10px var(--danger-glow); }
+        .flow-val { font-size: 14px; font-weight: 800; min-width: 70px; text-align: right; font-family: 'JetBrains Mono', monospace; }
+        .delta-display {
+            text-align: center;
+            padding: 20px;
+            border-radius: 12px;
+            background: rgba(0,0,0,0.2);
+            border: 1px solid var(--border);
+            margin-top: 10px;
+            box-shadow: inset 0 2px 10px rgba(0,0,0,0.2);
+        }
+        .delta-val { font-size: 42px; font-weight: 800; font-family: 'JetBrains Mono', monospace; text-shadow: 0 0 20px rgba(0,0,0,0.5); }
+        .delta-label { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: 1.5px; margin-top: 6px; font-weight: 700; }
+
+        /* TRADE TABLE */
+        .trade-table-wrap { padding: 0 8px 8px; overflow-x: auto; }
+        table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+        th {
+            padding: 14px 16px;
+            text-align: left;
+            font-size: 11px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text3);
+            border-bottom: 1px solid var(--border2);
+            background: rgba(0,0,0,0.2);
+        }
+        th:first-child { border-top-left-radius: 8px; }
+        th:last-child { border-top-right-radius: 8px; }
+        td {
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--border);
+            color: var(--text);
+            font-family: 'JetBrains Mono', monospace;
+            transition: background 0.2s;
+        }
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background: rgba(255,255,255,0.03); }
+
+        /* SYSTEM PROCESS CARDS */
+        .proc-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; padding: 24px; }
+        .proc-card {
+            background: linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0) 100%);
+            border-radius: 12px;
+            padding: 18px;
+            border: 1px solid var(--border);
+            border-top: 4px solid var(--text3);
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+        .proc-card:hover { transform: translateY(-4px); box-shadow: 0 10px 20px -5px rgba(0,0,0,0.4); }
+        .proc-card.healthy { border-top-color: var(--success); box-shadow: 0 4px 20px -10px var(--success-glow); }
+        .proc-card.healthy:hover { box-shadow: 0 10px 30px -10px var(--success-glow); }
+        .proc-card.warning { border-top-color: var(--warning); box-shadow: 0 4px 20px -10px rgba(245,158,11,0.3); }
+        .proc-card.critical { border-top-color: var(--danger); box-shadow: 0 4px 20px -10px var(--danger-glow); }
+        .proc-name { font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; color: var(--text); }
+        .proc-pid { font-size: 11px; color: var(--text3); font-family: 'JetBrains Mono', monospace; background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; margin-left: 8px; }
+        .proc-stats { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+        .proc-stat { background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.05); border-radius: 6px; padding: 4px 10px; font-size: 11px; font-family: 'JetBrains Mono', monospace; color: var(--text2); }
+
+        /* PULSE ANIMATION */
+        @keyframes pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.1); opacity: 0.6; } }
+        .pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+
+        /* EMPTY STATE */
+        .empty-state { text-align: center; padding: 60px 20px; color: var(--text3); font-size: 14px; font-weight: 500; }
+        .empty-state ion-icon { font-size: 48px; display: block; margin-bottom: 16px; opacity: 0.3; filter: drop-shadow(0 0 10px rgba(255,255,255,0.1)); }
+
+        /* SECTION TITLE */
+        .section-title { display: flex; align-items: center; gap: 12px; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 2px; color: var(--text3); padding: 0 8px; }
+        .section-title::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, var(--border2), transparent); }
+        .section-title ion-icon { font-size: 16px; color: var(--text2); }
+
+    </style>
 </head>
 <body>
-    <div class="app-wrapper">
-        <nav class="top-nav">
-            <div class="nav-brand">
-                <ion-icon name="flask-outline" class="brand-icon"></ion-icon>
-                <h1>Intelligence <span>Lab</span></h1>
-            </div>
-            <div class="nav-controls">
-                <a href="/" class="btn" title="Back to Live Terminal" style="text-decoration: none;">
-                    <ion-icon name="arrow-back-outline"></ion-icon> Live Terminal
-                </a>
-                <button id="refresh-lab" class="icon-btn" title="Refresh Analytics">
-                    <ion-icon name="refresh-outline"></ion-icon>
-                </button>
-            </div>
-        </nav>
+    <nav class="top-nav">
+        <div class="nav-brand">
+            <ion-icon name="flask-outline"></ion-icon>
+            Intelligence <span>Lab</span>
+        </div>
+        <div class="nav-controls">
+            <span class="refresh-time" id="last-refresh">--:--:--</span>
+            <a href="/" class="nav-btn">
+                <ion-icon name="arrow-back-outline"></ion-icon> Live Terminal
+            </a>
+            <button class="nav-btn" onclick="loadAll()" title="Refresh">
+                <ion-icon name="refresh-outline"></ion-icon>
+            </button>
+        </div>
+    </nav>
 
-        <main class="lab-container">
-            <!-- Phase 4.2: Health & Reliability -->
-            <div class="dashboard-grid" style="margin-bottom: 20px;">
-                <section class="lab-section" id="section-system-health">
-                    <h2><ion-icon name="pulse-outline"></ion-icon> System Health Monitor</h2>
-                    <ul class="insight-list" id="system-health-list">
-                        <li>Loading...</li>
-                    </ul>
-                </section>
-                <section class="lab-section" id="section-db-freshness">
-                    <h2><ion-icon name="server-outline"></ion-icon> Database Freshness</h2>
-                    <ul class="insight-list" id="db-freshness-list">
-                        <li>Loading...</li>
-                    </ul>
-                </section>
-                <section class="lab-section" id="section-confidence">
-                    <h2><ion-icon name="shield-checkmark-outline"></ion-icon> Research Confidence</h2>
-                    <div id="confidence-content" style="text-align:center; padding: 10px;">
-                        <div style="font-size:20px; font-weight:800; margin-bottom:10px;" id="confidence-level">Loading...</div>
-                        <div style="color:var(--text-secondary); font-size:14px;" id="confidence-msg">...</div>
-                        <div style="display:flex; justify-content:space-around; margin-top:15px; font-size:12px;">
-                            <div><span id="conf-sig">0</span><br>Total Signals</div>
-                            <div><span id="conf-exe">0</span><br>Executed</div>
-                            <div><span id="conf-rej">0</span><br>Rejected</div>
-                        </div>
-                    </div>
-                </section>
-            </div>
+    <div class="lab-body">
 
-            <!-- Section 1: Overview -->
-            <section class="lab-section" id="section-overview">
-                <h2><ion-icon name="stats-chart"></ion-icon> System Overview</h2>
-                <div class="metrics-grid" id="overview-metrics">
-                    <!-- Populated by JS -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- SECTION 1: SYSTEM HEALTH                           -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <div class="section-title">
+            <ion-icon name="pulse-outline"></ion-icon> System Health Monitor
+            <span class="tag tag-file">health_state.json · every 60s</span>
+        </div>
+
+        <div class="health-banner" id="health-banner">
+            <div class="health-score-box" id="health-score-box">
+                <div class="health-score-val" id="health-score">--</div>
+                <div class="health-score-lbl">Score</div>
+            </div>
+            <div class="health-stat">
+                <div class="health-stat-label">Feed Service</div>
+                <div class="health-stat-val" id="hs-feed-status">--</div>
+                <div class="health-stat-sub" id="hs-feed-ticks">0 ticks/s</div>
+            </div>
+            <div class="health-stat">
+                <div class="health-stat-label">Brain Service</div>
+                <div class="health-stat-val" id="hs-brain-status">--</div>
+                <div class="health-stat-sub" id="hs-brain-uptime">--</div>
+            </div>
+            <div class="health-stat">
+                <div class="health-stat-label">Research Collector</div>
+                <div class="health-stat-val" id="hs-research-status">--</div>
+                <div class="health-stat-sub" id="hs-research-mem">-- MB</div>
+            </div>
+            <div class="health-stat">
+                <div class="health-stat-label">Data Archival</div>
+                <div class="health-stat-val" id="hs-canonical-status">--</div>
+                <div class="health-stat-sub" id="hs-canonical-files">0 files</div>
+            </div>
+            <div class="health-stat">
+                <div class="health-stat-label">System Resources</div>
+                <div class="health-stat-val" id="hs-cpu">CPU --</div>
+                <div class="health-stat-sub" id="hs-ram">RAM -- | Disk --GB</div>
+            </div>
+        </div>
+
+        <!-- Process Detail Cards -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title"><ion-icon name="hardware-chip-outline"></ion-icon> Process Details</div>
+                <span class="tag tag-file">Via psutil</span>
+            </div>
+            <div class="proc-grid" id="proc-grid">
+                <div class="empty-state"><ion-icon name="reload-outline" class="pulse"></ion-icon>Loading...</div>
+            </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- SECTION 2: LIVE MARKET STATE                       -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <div class="section-title">
+            <ion-icon name="stats-chart-outline"></ion-icon> Live Market State
+            <span class="tag tag-live">Brain Service · every 2s</span>
+        </div>
+
+        <div class="panel-grid-3">
+            <!-- Indicators -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title"><ion-icon name="analytics-outline"></ion-icon> Technical Indicators</div>
                 </div>
-            </section>
-
-            <!-- Section 11: Machine Insights -->
-            <section class="lab-section highlight-section" id="section-insights">
-                <h2><ion-icon name="bulb"></ion-icon> Machine Insights</h2>
-                <ul class="insight-list" id="insights-list">
-                    <!-- Populated by JS -->
-                </ul>
-            </section>
-            
-            <div class="dashboard-grid">
-                <!-- Section 3: Strike Intelligence -->
-                <section class="lab-section" id="section-strike">
-                    <h2>Strike Intelligence</h2>
-                    <div class="table-responsive">
-                        <table id="strike-table">
-                            <thead>
-                                <tr>
-                                    <th>Strike</th>
-                                    <th>Obsv</th>
-                                    <th>Hit%</th>
-                                    <th>Median(s)</th>
-                                    <th>Max Fav%</th>
-                                    <th>Max Adv%</th>
-                                    <th>Efficiency</th>
-                                </tr>
-                            </thead>
-                            <tbody></tbody>
-                        </table>
+                <div class="live-grid" id="live-indicators">
+                    <div class="live-tile">
+                        <div class="live-tile-label">LTP</div>
+                        <div class="live-tile-val" id="li-ltp">--</div>
+                        <div class="live-tile-sub" id="li-symbol">--</div>
                     </div>
-                </section>
-
-                <!-- Section 4: Premium Intelligence -->
-                <section class="lab-section" id="section-premium">
-                    <h2>Premium Intelligence</h2>
-                    <div class="table-responsive">
-                        <table id="premium-table">
-                            <thead>
-                                <tr>
-                                    <th>Bucket</th>
-                                    <th>Win%</th>
-                                    <th>Speed(s)</th>
-                                    <th>Slippage</th>
-                                    <th>Gamma Adv</th>
-                                </tr>
-                            </thead>
-                            <tbody></tbody>
-                        </table>
+                    <div class="live-tile">
+                        <div class="live-tile-label">VWAP</div>
+                        <div class="live-tile-val" id="li-vwap">--</div>
+                        <div class="live-tile-sub">Anchored Daily</div>
                     </div>
-                </section>
-            </div>
-
-            <div class="dashboard-grid">
-                <!-- Section 5: Time Intelligence -->
-                <section class="lab-section" id="section-time">
-                    <h2>Time Intelligence</h2>
-                    <div class="chart-container" style="position: relative; height:250px; width:100%">
-                        <canvas id="timeChart"></canvas>
+                    <div class="live-tile">
+                        <div class="live-tile-label">9 EMA</div>
+                        <div class="live-tile-val" id="li-ema">--</div>
+                        <div class="live-tile-sub" id="li-ema-vs-vwap">-- vs VWAP</div>
                     </div>
-                </section>
-
-                <!-- Section 6: Filter Intelligence -->
-                <section class="lab-section" id="section-filters">
-                    <h2>Filter Intelligence</h2>
-                    <div class="table-responsive">
-                        <table id="filter-table">
-                            <thead>
-                                <tr>
-                                    <th>Filter</th>
-                                    <th>Rejected</th>
-                                    <th>Correct</th>
-                                    <th>False</th>
-                                    <th>Protection%</th>
-                                </tr>
-                            </thead>
-                            <tbody></tbody>
-                        </table>
+                    <div class="live-tile">
+                        <div class="live-tile-label">VFI (Raw / EMA)</div>
+                        <div class="live-tile-val" id="li-vfi">-- / --</div>
+                        <div class="live-tile-sub" id="li-vfi-bias">Volume Bias: --</div>
                     </div>
-                </section>
-            </div>
-
-            <div class="dashboard-grid">
-                <!-- Section 7: Order Flow -->
-                <section class="lab-section" id="section-orderflow">
-                    <h2>Order Flow Intelligence</h2>
-                    <div class="metrics-grid col-2" id="orderflow-metrics">
-                        <!-- Populated by JS -->
-                    </div>
-                </section>
-
-                <!-- Section 10: Market Environment -->
-                <section class="lab-section" id="section-market">
-                    <h2>Market Environment</h2>
-                    <div class="metrics-grid col-2" id="market-metrics">
-                        <!-- Populated by JS -->
-                    </div>
-                </section>
-            </div>
-            
-            <!-- Section 8 & 9: Execution & Scaling -->
-            <section class="lab-section" id="section-execution">
-                <h2>Execution & Capital Scaling</h2>
-                <div class="table-responsive">
-                    <table id="execution-table">
-                        <thead>
-                            <tr>
-                                <th>Strike</th>
-                                <th>Avg Spread</th>
-                                <th>Entry Slip</th>
-                                <th>Exit Slip</th>
-                                <th>Avg Liq Qty</th>
-                                <th>Safe Lots</th>
-                            </tr>
-                        </thead>
-                        <tbody></tbody>
-                    </table>
                 </div>
-            </section>
-
-            <!-- ============================================== -->
-            <!-- PHASE 4.1 ADVANCED SENSORS SECTION             -->
-            <!-- ============================================== -->
-            
-            <h2 class="section-divider"><ion-icon name="hardware-chip-outline"></ion-icon> Phase 4.1 Advanced Sensors</h2>
-            
-            <div class="dashboard-grid">
-                <!-- Section 12: OFA Health -->
-                <section class="lab-section" id="section-ofa-health">
-                    <h2>OFA Health & Stability</h2>
-                    <div class="metrics-grid col-2" id="ofa-health-metrics">
-                        <!-- Populated by JS -->
-                    </div>
-                </section>
-
-                <!-- Section 13: VFI Edge -->
-                <section class="lab-section" id="section-vfi-edge">
-                    <h2>VFI Quality Intelligence</h2>
-                    <div class="metrics-grid col-2" id="vfi-edge-metrics">
-                        <!-- Populated by JS -->
-                    </div>
-                </section>
             </div>
 
-            <div class="dashboard-grid">
-                <!-- Section 14: Target Optimization -->
-                <section class="lab-section" id="section-target-opt">
-                    <h2>Alternative Target Simulator</h2>
-                    <div class="table-responsive">
-                        <table id="target-opt-table">
-                            <thead>
-                                <tr>
-                                    <th>Target</th>
-                                    <th>Hit Rate</th>
-                                    <th>Avg Time</th>
-                                </tr>
-                            </thead>
-                            <tbody></tbody>
-                        </table>
-                    </div>
-                </section>
-
-                <!-- Section 15: Failure Analysis -->
-                <section class="lab-section" id="section-failure-dna">
-                    <h2>Failed Trade DNA</h2>
-                    <div class="metrics-grid col-2" id="failure-dna-metrics">
-                        <!-- Populated by JS -->
-                    </div>
-                </section>
-            </div>
-
-
-            <!-- ============================================== -->
-            <!-- PHASE 4.3 MARKET REGIME & TRADE QUALITY        -->
-            <!-- ============================================== -->
-            
-            <h2 class="section-divider"><ion-icon name="analytics-outline"></ion-icon> Phase 4.3 Trade Quality Intelligence</h2>
-            
-            <div class="dashboard-grid">
-                <!-- Section: Market Regime Intelligence -->
-                <section class="lab-section">
-                    <h2>Market Regime Hit Rates</h2>
-                    <div id="market-regime-content">
-                        <div class="stat-value">Loading...</div>
-                    </div>
-                </section>
-
-                <!-- Section: ATR Intelligence -->
-                <section class="lab-section">
-                    <h2>ATR Expansion Ratio</h2>
-                    <div id="atr-intel-content">
-                        <div class="stat-value">Loading...</div>
-                    </div>
-                </section>
-            </div>
-
-            <div class="dashboard-grid">
-                <!-- Section: VWAP Health -->
-                <section class="lab-section">
-                    <h2>EMA-VWAP Distance Optimals</h2>
-                    <div id="vwap-health-content">
-                        <div class="stat-value">Loading...</div>
-                    </div>
-                </section>
-
-                <!-- Section: VFI Intelligence -->
-                <section class="lab-section">
-                    <h2>VFI Divergence & Alignment</h2>
-                    <div id="vfi-intel-content">
-                        <div class="stat-value">Loading...</div>
-                    </div>
-                </section>
-            </div>
-
-            <div class="dashboard-grid">
-                <!-- Section: Trade Quality Distribution -->
-                <section class="lab-section" style="grid-column: 1 / -1;">
-                    <h2>Overall Trade Quality Distribution</h2>
-                    <div id="trade-quality-content">
-                        <div class="stat-value">Loading...</div>
-                    </div>
-                </section>
-            </div>
-            <!-- Phase 5: Shadow ML Brain -->
-            <div class="lab-header" style="margin-top: 40px; margin-bottom: 20px;">
-                <h1>Phase 5 — Shadow ML Brain & Gamma Discovery Lab</h1>
-            </div>
-            
-            <!-- Phase 5 Filter Bar -->
-            <div class="filter-bar" style="margin-bottom: 20px; display: flex; gap: 15px; flex-wrap: wrap; background: rgba(255,255,255,0.02); padding: 15px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); align-items: center;">
-                <div class="filter-group" style="display: flex; align-items: center; gap: 8px;">
-                    <label style="font-size: 13px; color: var(--text-secondary);">Session:</label>
-                    <select id="filter-session" style="background: #111; color: #fff; border: 1px solid rgba(255,255,255,0.1); padding: 5px 10px; border-radius: 4px; font-family: inherit;">
-                        <option value="ALL">All Sessions</option>
-                        <option value="LIVE">Live Only</option>
-                        <option value="SIMULATION">Simulation Only</option>
-                        <option value="REPLAY">Replay Only</option>
-                        <option value="UNIT_TEST">Unit Test Only</option>
-                    </select>
+            <!-- Market Regime -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title"><ion-icon name="compass-outline"></ion-icon> Market Regime</div>
                 </div>
-                <div class="filter-group" style="display: flex; align-items: center; gap: 8px;">
-                    <label style="font-size: 13px; color: var(--text-secondary);">Min Quality:</label>
-                    <select id="filter-quality" style="background: #111; color: #fff; border: 1px solid rgba(255,255,255,0.1); padding: 5px 10px; border-radius: 4px; font-family: inherit;">
-                        <option value="0">All Quality</option>
-                        <option value="90">Quality > 90</option>
-                    </select>
+                <div class="card-body">
+                    <div style="text-align: center; padding: 10px 0 20px;">
+                        <div style="font-size: 36px; font-weight: 800; margin-bottom: 8px;" id="regime-label">--</div>
+                        <div style="font-size: 12px; color: var(--text2);" id="regime-desc">Waiting for data...</div>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-key">ATR (14)</span>
+                        <span class="metric-val" id="li-atr">--</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-key">ATR Expansion Ratio</span>
+                        <span class="metric-val" id="li-atr-exp">--</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-key">Compression</span>
+                        <span class="metric-val" id="li-compression">--</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-key">Volume (Synth 50-stock)</span>
+                        <span class="metric-val" id="li-volume">--</span>
+                    </div>
                 </div>
-                <div class="filter-group" style="display: flex; align-items: center; gap: 8px;">
-                    <label style="font-size: 13px; color: var(--text-secondary);">Version:</label>
-                    <input type="text" id="filter-version" placeholder="e.g. v5.2" style="background: #111; color: #fff; border: 1px solid rgba(255,255,255,0.1); padding: 5px 10px; border-radius: 4px; width: 80px; font-family: inherit;">
+            </div>
+
+            <!-- Order Flow -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title"><ion-icon name="swap-vertical-outline"></ion-icon> Active Order Flow</div>
+                    <span class="tag tag-live">Sniper Mode</span>
                 </div>
-                <div class="filter-group" style="display: flex; align-items: center; gap: 8px;">
-                    <label style="font-size: 13px; color: var(--text-secondary);">Source:</label>
-                    <input type="text" id="filter-source" placeholder="e.g. WEBSOCKET" style="background: #111; color: #fff; border: 1px solid rgba(255,255,255,0.1); padding: 5px 10px; border-radius: 4px; width: 120px; font-family: inherit;">
+                <div id="order-flow-body">
+                    <div class="empty-state" style="padding: 30px;">
+                        <ion-icon name="eye-outline"></ion-icon>
+                        No active setup or trade.<br>Sniper mode is idle.
+                    </div>
                 </div>
-                <button id="apply-ml-filters" class="btn" style="padding: 6px 15px; border-radius: 4px; font-weight: 600; cursor: pointer; background: var(--primary-color, #00d2ff); color: #000; border: none; font-family: inherit;">Apply Filters</button>
             </div>
-            
-            <div class="dashboard-grid" style="margin-bottom: 20px;">
-                <!-- ML Maturity & Quality Distribution -->
-                <section class="lab-section">
-                    <h2><ion-icon name="hardware-chip-outline"></ion-icon> ML Maturity & Quality Distribution</h2>
-                    <div id="ml-maturity-content" style="text-align: center; padding: 10px; margin-bottom: 15px;">
-                        <div style="font-size: 20px; font-weight: 800;" id="ml-maturity-level">Loading...</div>
-                        <div style="color: var(--text-secondary); font-size: 14px;" id="ml-maturity-samples">0 samples collected</div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- SECTION 3: DECISION ENGINE STREAM                  -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <div class="section-title">
+            <ion-icon name="git-network-outline"></ion-icon> Signal Evaluation Engine
+            <span class="tag tag-file">decision_history.parquet · decision_journal service</span>
+        </div>
+
+        <div class="panel-grid-2">
+            <!-- Stats -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title"><ion-icon name="bar-chart-outline"></ion-icon> Today's Signal Statistics</div>
+                </div>
+                <div class="big-stat-grid" id="decision-stats">
+                    <div class="big-stat">
+                        <div class="big-stat-num" id="ds-total">--</div>
+                        <div class="big-stat-label">Evaluated</div>
                     </div>
-                    <div class="table-responsive">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Quality Grade</th>
-                                    <th>Classification</th>
-                                    <th>Samples</th>
-                                </tr>
-                            </thead>
-                            <tbody id="quality-dist-tbody">
-                                <tr><td colspan="3">Loading...</td></tr>
-                            </tbody>
-                        </table>
+                    <div class="big-stat">
+                        <div class="big-stat-num" id="ds-accepted" style="color: var(--success);">--</div>
+                        <div class="big-stat-label">Accepted</div>
                     </div>
-                </section>
-                
-                <!-- Data Quality Audit Monitor -->
-                <section class="lab-section">
-                    <h2><ion-icon name="shield-checkmark-outline"></ion-icon> Data Quality & Validator Audit</h2>
-                    <div class="metrics-grid col-2" id="data-quality-metrics" style="margin-bottom: 15px;">
-                        <div class="metric-card">
-                            <h3>Total Issues</h3>
-                            <div class="val" id="dq-total">0</div>
-                        </div>
-                        <div class="metric-card">
-                            <h3>Bad Ticks</h3>
-                            <div class="val" id="dq-bad-ticks" style="color: #ff4a4a;">0</div>
-                        </div>
+                    <div class="big-stat">
+                        <div class="big-stat-num" id="ds-rejected" style="color: var(--text3);">--</div>
+                        <div class="big-stat-label">Rejected</div>
                     </div>
-                    <div class="table-responsive">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Timestamp</th>
-                                    <th>Symbol</th>
-                                    <th>Type</th>
-                                    <th>Value</th>
-                                    <th>Status</th>
-                                    <th>Session</th>
-                                    <th>Quality</th>
-                                    <th>Connection</th>
-                                    <th>Version</th>
-                                    <th>Source</th>
-                                </tr>
-                            </thead>
-                            <tbody id="dq-logs-tbody">
-                                <tr><td colspan="10" style="text-align: center; color: var(--text-secondary);">Loading...</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </section>
+                </div>
+
+                <div class="reason-bars" id="reason-bars">
+                    <div style="font-size: 11px; color: var(--text3); font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 4px;">Top Rejection Reasons</div>
+                </div>
             </div>
 
-            <div class="dashboard-grid" style="margin-bottom: 20px;">
-                <!-- Missed Opportunity Intelligence (Failed Ignition) -->
-                <section class="lab-section" style="grid-column: 1 / -1;">
-                    <h2><ion-icon name="warning-outline"></ion-icon> Missed Opportunity Analyzer (Failed Ignitions - Quality 1)</h2>
-                    <div class="table-responsive">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Timestamp</th>
-                                    <th>Symbol</th>
-                                    <th>Max Attempted Move</th>
-                                    <th>Rejection Retrace</th>
-                                    <th>Detectable Failure Reason</th>
-                                    <th>Session</th>
-                                    <th>Quality</th>
-                                    <th>Connection</th>
-                                    <th>Version</th>
-                                    <th>Source</th>
-                                </tr>
-                            </thead>
-                            <tbody id="failed-ignition-tbody">
-                                <tr><td colspan="10" style="text-align: center; color: var(--text-secondary);">No failed ignitions logged yet. Waiting for market action.</td></tr>
-                            </tbody>
-                        </table>
+            <!-- Live Feed -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title"><ion-icon name="pulse-outline"></ion-icon> Live Decision Stream</div>
+                    <span class="tag tag-live">Last 20</span>
+                </div>
+                <div class="decision-feed" id="decision-feed">
+                    <div class="empty-state"><ion-icon name="reload-outline" class="pulse"></ion-icon>Loading...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- SECTION 4: STRATEGY LOGIC                          -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <div class="section-title">
+            <ion-icon name="code-working-outline"></ion-icon> Active Strategy Logic
+            <span class="tag tag-live">signal_generator.py</span>
+        </div>
+
+        <div class="panel-grid-2">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title"><ion-icon name="flash-outline"></ion-icon> Strategy 1 — Window Alignment (10m Breakout)</div>
+                </div>
+                <div class="card-body">
+                    <div class="metric-row">
+                        <span class="metric-key">Trigger (CALL)</span>
+                        <span class="metric-val" style="font-size: 11px; color: var(--text2);">Close > VWAP AND EMA9 > VWAP AND VFI > 0</span>
                     </div>
-                </section>
+                    <div class="metric-row">
+                        <span class="metric-key">Trigger (PUT)</span>
+                        <span class="metric-val" style="font-size: 11px; color: var(--text2);">Close &lt; VWAP AND EMA9 &lt; VWAP AND VFI &lt; 0</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-key">Anchor Required</span>
+                        <span class="metric-val" style="font-size: 11px; color: var(--text2);">VWAP crossover in last 10 candles</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-key">Momentum Filter</span>
+                        <span class="metric-val" style="font-size: 11px; color: var(--text2);">Green bodies > Red bodies (since crossover)</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-key">Status (CALL now)</span>
+                        <span class="metric-val" id="strat1-call-status">--</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-key">Status (PUT now)</span>
+                        <span class="metric-val" id="strat1-put-status">--</span>
+                    </div>
+                </div>
             </div>
 
-            <div class="dashboard-grid" style="margin-bottom: 20px;">
-                <!-- Feature Importance & Regime Stability -->
-                <section class="lab-section">
-                    <h2><ion-icon name="git-branch-outline"></ion-icon> Feature Importance & Regime Stability</h2>
-                    <div class="table-responsive">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Feature Name</th>
-                                    <th>Regime</th>
-                                    <th>Avg Importance</th>
-                                    <th>Drift Warnings</th>
-                                </tr>
-                            </thead>
-                            <tbody id="feature-regimes-tbody">
-                                <tr><td colspan="4">No importance history logged yet. Runs outside market hours.</td></tr>
-                            </tbody>
-                        </table>
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title"><ion-icon name="return-down-back-outline"></ion-icon> Strategy 2 — Rejection Window (5m EMA Bounce)</div>
+                </div>
+                <div class="card-body">
+                    <div class="metric-row">
+                        <span class="metric-key">Trigger (CALL)</span>
+                        <span class="metric-val" style="font-size: 11px; color: var(--text2);">Close crossed above EMA9 AND VFI > VFI_EMA</span>
                     </div>
-                </section>
-                
-                <!-- Recent Explosive Discoveries (Quality 4) & Replay Paths -->
-                <section class="lab-section">
-                    <h2><ion-icon name="rocket-outline"></ion-icon> Recent Explosive Discoveries & Premium Paths</h2>
-                    <div class="table-responsive">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Timestamp</th>
-                                    <th>Symbol</th>
-                                    <th>Burst %</th>
-                                    <th>Path (Start → Peak)</th>
-                                    <th>Session</th>
-                                    <th>Quality</th>
-                                    <th>Connection</th>
-                                    <th>Version</th>
-                                    <th>Source</th>
-                                </tr>
-                            </thead>
-                            <tbody id="explosive-discoveries-tbody">
-                                <tr><td colspan="9" style="text-align: center; color: var(--text-secondary);">No explosive bursts logged yet. Scanning...</td></tr>
-                            </tbody>
-                        </table>
+                    <div class="metric-row">
+                        <span class="metric-key">Trigger (PUT)</span>
+                        <span class="metric-val" style="font-size: 11px; color: var(--text2);">Close crossed below EMA9 AND VFI &lt; VFI_EMA</span>
                     </div>
-                </section>
+                    <div class="metric-row">
+                        <span class="metric-key">Anchor Required</span>
+                        <span class="metric-val" style="font-size: 11px; color: var(--text2);">VWAP rejection touch in last 5 candles</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-key">Momentum Filter</span>
+                        <span class="metric-val" style="font-size: 11px; color: var(--text2);">Green bodies > Red bodies (since anchor)</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-key">Execution</span>
+                        <span class="metric-val" style="font-size: 11px; color: var(--text2);">Same sniper entry after signal</span>
+                    </div>
+                </div>
             </div>
+        </div>
 
-        </main>
-    </div>
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- SECTION 5: TRADE HISTORY                           -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <div class="section-title">
+            <ion-icon name="receipt-outline"></ion-icon> Trade History
+            <span class="tag tag-file">trade_history.json · paper_trader</span>
+        </div>
 
-    <!-- Modular JS loading -->
-    <script src="{{ url_for('static', filename='js/intelligence/overview_panel.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/intelligence/insights_panel.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/intelligence/strike_panel.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/intelligence/premium_panel.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/intelligence/time_panel.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/intelligence/filter_panel.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/intelligence/orderflow_panel.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/intelligence/market_panel.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/intelligence/execution_panel.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/intelligence/phase41_panels.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/intelligence/phase42_panels.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/intelligence/phase43_panels.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/intelligence/phase5_panels.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/intelligence/intelligence_main.js') }}"></script>
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title"><ion-icon name="list-outline"></ion-icon> Executed Trades</div>
+                <div style="display: flex; gap: 12px; align-items: center;">
+                    <span>P&amp;L: <strong id="total-pl" style="color: var(--success);">₹0</strong></span>
+                    <span style="color: var(--text3);">|</span>
+                    <span style="color: var(--success);" id="trade-wins">0W</span>
+                    <span style="color: var(--danger);" id="trade-losses">0L</span>
+                </div>
+            </div>
+            <div class="trade-table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Symbol</th>
+                            <th>Strategy</th>
+                            <th>Entry</th>
+                            <th>Exit</th>
+                            <th>Duration</th>
+                            <th>Opt %</th>
+                            <th>P&amp;L</th>
+                            <th>Result</th>
+                            <th>Exit Reason</th>
+                        </tr>
+                    </thead>
+                    <tbody id="trade-tbody">
+                        <tr><td colspan="10" style="text-align:center; color: var(--text3); padding: 30px;">No trades executed yet.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </div><!-- /lab-body -->
+
+    <script src="{{ url_for('static', filename='js/intelligence_lab.js') }}?v=2.0"></script>
 </body>
 </html>

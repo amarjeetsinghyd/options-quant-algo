@@ -3,6 +3,7 @@ import threading
 import sys
 import os
 import uuid
+os.environ["POLARS_IGNORE_TIMEZONE_PARSE_ERROR"] = "1"
 import pandas as pd
 from datetime import datetime
 
@@ -16,6 +17,8 @@ from src.strategy.signal_generator import SignalGenerator
 from src.execution.paper_trader import PaperTrader
 from src.core.message_bus import MessageBusPublisher, MessageBusSubscriber, FEED_PORT, CMD_PORT, EXEC_PORT
 from src.utils.logger import get_logger
+from src.ml_engine.gamma_event_collector import GammaEventCollector
+from src.research.strike_intelligence import StrikeIntelligenceModule
 
 logger = get_logger("brain_service")
 
@@ -30,6 +33,8 @@ class BrainService:
         self.fetcher = DataFetcher(self.api)
         self.signal_gen = SignalGenerator()
         self.trader = PaperTrader(self.api, self.fetcher, [])
+        self.gamma_collector = GammaEventCollector()
+        self.strike_intelligence = StrikeIntelligenceModule()
         
         self.anchor_token, self.anchor_symbol, self.anchor_exch = self.fetcher.get_cash_index_token()
         self.active_tokens = self.fetcher.get_active_constituents()
@@ -85,7 +90,8 @@ class BrainService:
         self.cmd_pub.publish("CMD.SUBSCRIBE", {"tokens": tokens, "exchange": exchange})
         # Add ZMQ subscriptions so Brain receives them
         for tk in tokens:
-            self.feed_sub.socket.setsockopt_string(importlib_zmq_is_hard_im_sorry_i_mean_zmq.SUBSCRIBE, f"TICK.{tk}")
+            import zmq
+            self.feed_sub.socket.setsockopt_string(zmq.SUBSCRIBE, f"TICK.{tk}")
 
     def on_tick(self, topic, message):
         """Callback for incoming ZMQ ticks"""
@@ -156,6 +162,18 @@ class BrainService:
                 "option_details": opt_details,
                 "exchange_timestamp": message.get("exchange_timestamp") or message.get("exch_time")
             })
+            
+            try:
+                self.gamma_collector.feed_tick(
+                    symbol=opt_details["symbol"],
+                    price=opt_price,
+                    index_price=self.live_ltp if self.live_ltp else 0.0,
+                    market_state=self.get_current_market_state(),
+                    option_details=opt_details,
+                    exchange_timestamp=message.get("exchange_timestamp") or message.get("exch_time")
+                )
+            except Exception as e:
+                logger.error(f"Gamma collector error: {e}")
 
         # 5. Order Flow / Delta Tracking for Active Option
         if self.subscribed_option == token and ltp > 0:
@@ -267,7 +285,7 @@ class BrainService:
                                     for strike_val in target_strikes:
                                         strike_scaled = int(strike_val * 100)
                                         for opt_type in ["CE", "PE"]:
-                                            match = weekly_opts[(weekly_opts['strike'].astype(int) == strike_scaled) & (weekly_opts['symbol'].str.endswith(opt_type))]
+                                            match = weekly_opts[(weekly_opts['strike'].astype(float).astype(int) == strike_scaled) & (weekly_opts['symbol'].str.endswith(opt_type))]
                                             if not match.empty:
                                                 row = match.iloc[0]
                                                 tk = str(row['token'])
@@ -396,13 +414,21 @@ class BrainService:
                             pending_signal['signal_category'] = 'REJECTED'
                             self.exec_pub.publish("EXEC.SIGNAL_RESOLVED", payload)
                             
+                        try:
+                            self.strike_intelligence.register_signal(payload)
+                        except Exception as e:
+                            logger.error(f"Strike Intelligence error: {e}")
+                            
                     # Publish Telemetry for UI
                     latest = self.current_df.iloc[-1]
                     telemetry = {
+                        "symbol": self.anchor_symbol,
                         "ltp": self.live_ltp,
                         "volume": sum(self.current_minute_volume_tracker.values()),
                         "vwap": float(latest.get('vwap', 0)),
-                        "vfi": float(latest.get('vfi', 0))
+                        "ema": float(latest.get('ema_9', 0)),
+                        "vfi": float(latest.get('vfi', 0)),
+                        "vfi_ema": float(latest.get('vfi_ema', 0))
                     }
                     self.exec_pub.publish("EXEC.TELEMETRY", telemetry)
                     

@@ -12,6 +12,7 @@ import pyarrow.parquet as pq
 from src.utils.logger import get_logger
 from src.core.message_bus import MessageBusSubscriber, FEED_PORT
 from src.core.dataset_manifest import DatasetManifest
+from src.core.market_calendar import MarketCalendar
 
 logger = get_logger("canonical_collector")
 
@@ -95,7 +96,7 @@ class CanonicalCollector:
             return "options"
         elif symbol.endswith("FUT"):
             return "futures"
-        elif token in ["26000", "26009", "99926017"]: # NIFTY, BANKNIFTY spot, INDIA VIX
+        elif token in ["26000", "26009", "99926017", "99919000"]: # NIFTY, BANKNIFTY, INDIA VIX, SENSEX
             return "underlying"
         else:
             return "constituents"
@@ -166,8 +167,9 @@ class CanonicalCollector:
                 time.sleep(0.1) 
                 
                 try:
-                    self._flush_canonical_snapshot(now)
-                    self._flush_raw_ticks(now)
+                    if MarketCalendar.is_market_open(now) or MarketCalendar.is_preopen(now):
+                        self._flush_canonical_snapshot(now)
+                        self._flush_raw_ticks(now)
                     self.last_minute_tracked = now.minute
                 except Exception as exc:
                     logger.error("CanonicalCollector flush error: %s", exc, exc_info=True)

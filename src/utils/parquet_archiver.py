@@ -2,6 +2,7 @@ import os
 import sqlite3
 import pandas as pd
 from datetime import datetime
+from pathlib import Path
 from src.utils.logger import get_logger
 from src.utils.instrumentation import get_db_connection
 from src.config.engineering_config import ML_DB_PATH, STRIKE_DB_PATH, DATA_DIR
@@ -58,9 +59,64 @@ def archive_ml_database(date_str=None):
     except Exception as e:
         logger.error(f"Error during Parquet archival: {e}")
     finally:
+        try:
+            logger.info("Running VACUUM to shrink ML Database...")
+            conn.execute("VACUUM")
+        except Exception as ve:
+            logger.error(f"VACUUM failed: {ve}")
         conn.close()
+
+def compress_institutional_memory():
+    """
+    Compresses the 1-minute Parquet files in institutional_memory into a single daily file.
+    Deletes the individual minute files after successful compression.
+    """
+    inst_mem_dir = Path(DATA_DIR) / "institutional_memory"
+    
+    for base_folder in ["canonical_observations", "raw_ticks"]:
+        base_path = inst_mem_dir / base_folder
+        if not base_path.exists(): continue
+            
+        all_parquets = list(base_path.rglob("*.parquet"))
+        dir_groups = {}
+        for p in all_parquets:
+            if "full_day" in p.name or (len(p.stem) == 8 and p.stem.isdigit()): continue
+            dir_groups.setdefault(p.parent, []).append(p)
+            
+        for day_dir, files in dir_groups.items():
+            if len(files) < 2: continue # Nothing to merge
+            
+            logger.info(f"Compressing {len(files)} files in {day_dir}")
+            try:
+                dfs = [pd.read_parquet(f) for f in files]
+                merged_df = pd.concat(dfs, ignore_index=True)
+                
+                day_str = day_dir.name
+                month_str = day_dir.parent.name
+                year_str = day_dir.parent.parent.name
+                
+                new_filename = f"{day_str}{month_str}{year_str}.parquet"
+                out_path = day_dir.parent / new_filename
+                
+                merged_df.to_parquet(out_path, index=False, compression="ZSTD")
+                
+                for f in files:
+                    try:
+                        f.unlink()
+                    except Exception as e:
+                        logger.error(f"Failed to delete {f}: {e}")
+                        
+                try:
+                    day_dir.rmdir()
+                except OSError:
+                    pass
+                        
+                logger.info(f"Successfully compressed {day_dir} into {out_path.name}")
+            except Exception as e:
+                logger.error(f"Failed to compress {day_dir}: {e}")
 
 if __name__ == "__main__":
     logger.info("Starting Daily Parquet Archival Job...")
     archive_ml_database()
+    compress_institutional_memory()
     logger.info("Archival Complete.")

@@ -39,11 +39,6 @@ SERVICES = [
         "restart_on_failure": True,
     },
     {
-        "name": "shadow_service",
-        "command": [sys.executable, "src/services/shadow_service.py"],
-        "restart_on_failure": True,
-    },
-    {
         "name": "research_collector",
         "command": [sys.executable, "src/services/research_service.py"],
         "restart_on_failure": True,
@@ -51,6 +46,11 @@ SERVICES = [
     {
         "name": "web_dashboard",
         "command": [sys.executable, "main.py"],
+        "restart_on_failure": True,
+    },
+    {
+        "name": "maintenance_service",
+        "command": [sys.executable, "src/services/maintenance_service.py"],
         "restart_on_failure": True,
     },
     {
@@ -91,9 +91,8 @@ class ProcessSupervisor:
         try:
             proc = subprocess.Popen(
                 command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
+                # Remove PIPE to prevent OS buffer deadlocks (processes freezing after 64KB output).
+                # The children will inherit stdout/stderr from start_all.py directly.
             )
             self.processes[name] = proc
             self.restart_counts.setdefault(name, 0)
@@ -176,9 +175,9 @@ def handle_shutdown(signum, frame):
 
 def main():
     global supervisor
-    logger.info("┌──────────────────────────────────────────────────────────────────────┐")
-    logger.info("│      Options Quant Algo - Start All Services            │")
-    logger.info("└──────────────────────────────────────────────────────────────────────┘")
+    logger.info("------------------------------------------------------------------------")
+    logger.info("|      Options Quant Algo - Start All Services                         |")
+    logger.info("------------------------------------------------------------------------")
 
     # Autonomous Boot Check: Is it a trading day?
     if not is_trading_day():

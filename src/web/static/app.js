@@ -125,7 +125,7 @@ function playPing() {
 // TELEMETRY
 async function fetchTelemetry() {
     try {
-        const response = await fetch('/api/status');
+        const response = await fetch('/api/status', { cache: 'no-store' });
         const data = await response.json();
         updateUI(data);
     } catch (e) {
@@ -139,27 +139,30 @@ function updateUI(data) {
     const sysBot = document.getElementById('sys-mode-bottom');
     const sysBadge = document.getElementById('system-mode-indicator');
 
+    let btnStart = document.getElementById('btn-start');
+    let btnStop = document.getElementById('btn-stop');
+
     if (data.status === 'initializing') {
         sysTop.innerText = "INITIALIZING MODE";
         sysBot.innerText = "CONNECTING...";
         sysBot.style.color = "var(--accent)";
         sysBadge.style.border = "1px solid var(--accent)";
-        document.getElementById('btn-start').style.display = 'none';
-        document.getElementById('btn-stop').style.display = 'flex';
+        if(btnStart) btnStart.style.display = 'none';
+        if(btnStop) btnStop.style.display = 'flex';
     } else if (data.status === 'running') {
         sysTop.innerText = "PAPER MODE";
         sysBot.innerText = "DATA LIVE";
         sysBot.style.color = "var(--success)";
         sysBadge.style.border = "1px solid var(--success)";
-        document.getElementById('btn-start').style.display = 'none';
-        document.getElementById('btn-stop').style.display = 'flex';
+        if(btnStart) btnStart.style.display = 'none';
+        if(btnStop) btnStop.style.display = 'flex';
     } else if (data.status === 'error') {
         sysTop.innerText = "ERROR MODE";
         sysBot.innerText = "API/WS DISCONNECTED";
         sysBot.style.color = "var(--danger)";
         sysBadge.style.border = "1px solid var(--danger)";
-        document.getElementById('btn-start').style.display = 'flex';
-        document.getElementById('btn-stop').style.display = 'none';
+        if(btnStart) btnStart.style.display = 'flex';
+        if(btnStop) btnStop.style.display = 'none';
         
         // Show error message if not shown in banner
         if (data.error_msg) {
@@ -173,8 +176,8 @@ function updateUI(data) {
         sysBot.innerText = "API OFF";
         sysBot.style.color = "var(--primary)";
         sysBadge.style.border = "1px solid var(--border)";
-        document.getElementById('btn-start').style.display = 'flex';
-        document.getElementById('btn-stop').style.display = 'none';
+        if(btnStart) btnStart.style.display = 'flex';
+        if(btnStop) btnStop.style.display = 'none';
     }
 
     // Render Error Banner
@@ -193,7 +196,13 @@ function updateUI(data) {
     }
 
     if (data.telemetry) {
-        document.getElementById('val-symbol').innerText = data.telemetry.symbol || '--';
+        if (data.telemetry.symbol) {
+            document.getElementById('val-symbol').innerText = data.telemetry.symbol;
+            const legendElem = document.getElementById('legend-symbol-display');
+            if (legendElem) legendElem.innerText = data.telemetry.symbol;
+        } else {
+            document.getElementById('val-symbol').innerText = '--';
+        }
         let ltpElem = document.getElementById('val-ltp');
         if (data.telemetry.ltp) {
             currentLiveLtp = data.telemetry.ltp;

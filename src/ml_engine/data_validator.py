@@ -3,6 +3,7 @@ from datetime import datetime
 import os
 import sys
 from src.core.market_calendar import MarketCalendar
+import pandas as pd
 from src.utils.logger import get_logger
 from src.utils.instrumentation import get_db_connection
 from src.config.engineering_config import ML_DB_PATH as DB_PATH
