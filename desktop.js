@@ -97,14 +97,7 @@ if (!gotTheLock) {
         const contextMenu = Menu.buildFromTemplate([
             { label: 'Show Dashboard', click: () => mainWindow.show() },
             { 
-                label: 'Quit UI', 
-                click: () => {
-                    app.isQuitting = true;
-                    app.quit();
-                } 
-            },
-            {
-                label: 'Quit UI (Leaves Engine Running)',
+                label: 'Quit Terminal (Leaves Engine Running)', 
                 click: () => {
                     app.isQuitting = true;
                     app.quit();
