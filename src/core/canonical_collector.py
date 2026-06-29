@@ -10,6 +10,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from src.utils.logger import get_logger
+from src.config.engineering_config import DATA_DIR
+from src.core.symbol_registry import SymbolRegistry
 from src.core.message_bus import MessageBusSubscriber, FEED_PORT
 from src.core.dataset_manifest import DatasetManifest
 from src.core.market_calendar import MarketCalendar
@@ -29,6 +31,7 @@ class CanonicalCollector:
     def __init__(self, session_manager=None, poll_interval_seconds: int = 60):
         self.poll_interval = poll_interval_seconds
         self._stop_event = threading.Event()
+        self.registry = SymbolRegistry()
         self._thread = None
         self._zmq_thread = None
         self._heartbeat_thread = None
@@ -96,7 +99,7 @@ class CanonicalCollector:
             return "options"
         elif symbol.endswith("FUT"):
             return "futures"
-        elif token in ["26000", "26009", "99926017", "99919000"]: # NIFTY, BANKNIFTY, INDIA VIX, SENSEX
+        elif symbol in ["NIFTY_50", "BANKNIFTY", "INDIA VIX", "SENSEX"] or token in ["26000", "26009", "99926017", "99919000"]:
             return "underlying"
         else:
             return "constituents"
@@ -108,25 +111,31 @@ class CanonicalCollector:
                 payload['local_observation_timestamp'] = now.isoformat() + "Z"
                 
                 token = str(payload.get('token', ''))
-                symbol = payload.get('symbol', '')
+                raw_symbol = payload.get('symbol', '')
+                
+                # 1. Map to Universal Symbol
+                symbol = self.registry.get_symbol(token, raw_symbol)
+                
                 if not symbol:
-                    # In some feeds symbol isn't provided directly, infer category best effort
                     category = "options" if int(token) > 30000 else "constituents"
                     if token in ["26000", "99926017"]: category = "underlying"
                 else:
                     category = self._get_category(token, symbol)
                 
+                # Replace broker token with universal symbol in payload for Parquet storage
+                payload['symbol'] = symbol
+                
                 with self._buffer_lock:
                     # 1. Store Raw Tick
                     self._raw_buffers[category].append(payload)
                     
-                    # 2. Update Live Canonical State
+                    # 2. Update Live Canonical State (Indexed by SYMBOL, not token)
                     ltp = float(payload.get('last_traded_price', 0) / 100.0) if payload.get('last_traded_price') else 0.0
                     vol = payload.get('volume_trade_for_the_day', 0)
                     
-                    if token not in self.market_state[category]:
-                        self.market_state[category][token] = {
-                            "symbol": symbol,
+                    if symbol not in self.market_state[category]:
+                        self.market_state[category][symbol] = {
+                            "token": token,
                             "open": ltp,
                             "high": ltp,
                             "low": ltp,
@@ -134,7 +143,7 @@ class CanonicalCollector:
                             "volume_for_the_day": vol
                         }
                     else:
-                        state = self.market_state[category][token]
+                        state = self.market_state[category][symbol]
                         state["close"] = ltp
                         state["volume_for_the_day"] = max(state["volume_for_the_day"], vol)
                         if ltp > state["high"]: state["high"] = ltp
@@ -142,7 +151,7 @@ class CanonicalCollector:
                         
                     # Option Specific Microstructure
                     if category == "options":
-                        state = self.market_state[category][token]
+                        state = self.market_state[category][symbol]
                         if 'best_5_buy_data' in payload and payload['best_5_buy_data']:
                             state["best_bid_price"] = payload['best_5_buy_data'][0].get('price', 0) / 100.0
                             state["best_bid_qty"] = payload['best_5_buy_data'][0].get('quantity', 0)
@@ -224,11 +233,11 @@ class CanonicalCollector:
             
             # Reset OHLC for next minute, keep volume
             for cat in self.market_state:
-                for tk in self.market_state[cat]:
-                    last_close = self.market_state[cat][tk]["close"]
-                    self.market_state[cat][tk]["open"] = last_close
-                    self.market_state[cat][tk]["high"] = last_close
-                    self.market_state[cat][tk]["low"] = last_close
+                for sym in self.market_state[cat]:
+                    last_close = self.market_state[cat][sym]["close"]
+                    self.market_state[cat][sym]["open"] = last_close
+                    self.market_state[cat][sym]["high"] = last_close
+                    self.market_state[cat][sym]["low"] = last_close
 
         # Generate the exact same UUID5 as the BrainService does, based on pandas timestamp string
         ts_str = str(pd.Timestamp(timestamp.replace(second=0, microsecond=0)))
@@ -240,9 +249,9 @@ class CanonicalCollector:
             if not tokens: continue
             
             records = []
-            for tk, data in tokens.items():
+            for sym, data in tokens.items():
                 record = data.copy()
-                record["token"] = tk
+                record["symbol"] = sym
                 record["observation_uuid"] = obs_uuid
                 record["local_observation_timestamp"] = time_str
                 record["market_session_id"] = self.session_id

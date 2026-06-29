@@ -28,6 +28,11 @@ class MaintenanceService:
             logger.info("Running ML Data Validator...")
             subprocess.run([sys.executable, "src/ml_engine/eod_validator.py"], check=False)
             
+                    # 3. Cloud Backup (direct call — no subprocess overhead)
+            logger.info("Running Cloud Backup...")
+            from src.services.cloud_backup import run_backup
+            run_backup()
+            
             logger.info("=== EOD MAINTENANCE COMPLETED ===")
         except Exception as e:
             logger.error(f"Error during EOD maintenance: {e}")
