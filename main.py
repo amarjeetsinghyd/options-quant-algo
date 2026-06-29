@@ -256,7 +256,42 @@ def intel_trades():
     except Exception as e:
         return jsonify({'error': str(e)})
 
+@app.route('/api/intelligence/logs')
+def intel_logs():
+    """Reads last 150 lines from today's on-disk log file. Survives Ctrl+R refreshes."""
+    try:
+        today_str = datetime.now().strftime('%Y-%m-%d')
+        log_path = os.path.join(os.path.dirname(__file__), 'logs', today_str, 'app.log')
+
+        lines = []
+        if os.path.exists(log_path):
+            with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
+                all_lines = f.readlines()
+                raw_lines = all_lines[-150:]
+
+            for line in raw_lines:
+                line = line.strip()
+                if not line:
+                    continue
+                level = 'INFO'
+                if '[ERROR]' in line or '[E ' in line or 'Error' in line:
+                    level = 'ERROR'
+                elif '[WARNING]' in line or 'WARNING' in line:
+                    level = 'WARNING'
+                elif '[CRITICAL]' in line or 'CRITICAL' in line:
+                    level = 'CRITICAL'
+                elif 'SUCCESS' in line or 'complete' in line.lower() or 'started' in line.lower():
+                    level = 'SUCCESS'
+                lines.append({'text': line, 'level': level})
+        else:
+            lines.append({'text': f'[{today_str}] No log file found. System may not have started yet.', 'level': 'WARNING'})
+
+        return jsonify({'lines': lines, 'count': len(lines)})
+    except Exception as e:
+        return jsonify({'error': str(e), 'lines': []})
+
 if __name__ == '__main__':
+
     # Start the background subscriber
     t = threading.Thread(target=start_zmq_listener, daemon=True)
     t.start()

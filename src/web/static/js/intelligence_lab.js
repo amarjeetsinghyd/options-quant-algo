@@ -313,6 +313,57 @@ function updateTime() {
     document.getElementById('last-refresh').textContent = `Last sync: ${now.toLocaleTimeString()}`;
 }
 
+// ── TERMINAL ─────────────────────────────────────────────────────────────
+let _lastLogCount = 0;
+
+async function fetchLogs() {
+    try {
+        const res = await fetch('/api/intelligence/logs');
+        if (!res.ok) throw new Error('API Error');
+        const data = await res.json();
+
+        const lines = data.lines || [];
+        const terminal = document.getElementById('terminal-output');
+        const lineCount = document.getElementById('term-line-count');
+        const dot = document.getElementById('term-status-dot');
+
+        if (!terminal) return;
+
+        // Only re-render if new lines have arrived (avoids scroll jump)
+        if (lines.length === _lastLogCount && _lastLogCount > 0) return;
+        _lastLogCount = lines.length;
+
+        lineCount.textContent = `${lines.length} lines`;
+        dot.style.background = lines.length > 0 ? '#10b981' : '#f59e0b';
+        dot.style.boxShadow = lines.length > 0 ? '0 0 8px #10b981' : '0 0 8px #f59e0b';
+
+        // Update the path shown in header
+        const today = new Date().toISOString().split('T')[0];
+        document.getElementById('term-path').textContent = `logs/${today}/app.log`;
+
+        // Render lines
+        terminal.innerHTML = lines.map(l => {
+            // Escape HTML in log text
+            const safe = l.text
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+            return `<div class="log-line log-${l.level}">${safe}</div>`;
+        }).join('');
+
+        // Auto-scroll to bottom if checkbox is checked
+        const autoScroll = document.getElementById('term-autoscroll');
+        if (autoScroll && autoScroll.checked) {
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+    } catch (err) {
+        const terminal = document.getElementById('terminal-output');
+        if (terminal) {
+            terminal.innerHTML = `<div class="log-line log-ERROR">⚠ Failed to connect to log stream: ${err.message}</div>`;
+        }
+    }
+}
+
 async function loadAll() {
     await Promise.all([
         fetchHealth(),
@@ -324,6 +375,10 @@ async function loadAll() {
     updateTime();
 }
 
-// Init
+// Main data polling: every 2 seconds
 setInterval(loadAll, 2000);
 loadAll();
+
+// Terminal polling: every 3 seconds (slightly offset to reduce server load)
+setInterval(fetchLogs, 3000);
+setTimeout(fetchLogs, 500); // First load immediately on page open
