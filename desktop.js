@@ -17,6 +17,8 @@ if (!gotTheLock) {
             if (mainWindow.isMinimized()) mainWindow.restore();
             mainWindow.show();
             mainWindow.focus();
+            // Automatically refresh the page to fix white screens if the engine restarted
+            mainWindow.reload();
         }
     });
 
