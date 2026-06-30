@@ -131,6 +131,12 @@ class MarketCalendar:
     def next_market_open(dt=None):
         """Finds the next trading day's open datetime."""
         dt = dt or datetime.now()
+        
+        # If today is a trading day and we are before 9:15 AM, the next open is today
+        if not MarketCalendar.is_weekend(dt) and not MarketCalendar.is_holiday(dt):
+            if dt.time() < time(9, 15, 0):
+                return datetime.combine(dt.date(), time(9, 15, 0))
+                
         current = dt
         for _ in range(10): # Safe limit to look forward
             current += timedelta(days=1)
