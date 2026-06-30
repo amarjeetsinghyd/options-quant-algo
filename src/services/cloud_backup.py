@@ -23,8 +23,10 @@ def create_backup_zip():
     zip_path = os.path.join(DATA_DIR, f"backup_{today_str}.zip")
     
     logger.info(f"Creating backup zip at {zip_path}...")
+    project_root = os.path.dirname(DATA_DIR)
     
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as zipf:
+        # 1. Backup Data Directory
         for root, dirs, files in os.walk(DATA_DIR):
             for file in files:
                 # Skip the heavy dictionary file and the zip itself
@@ -32,10 +34,22 @@ def create_backup_zip():
                     continue
                 
                 abs_path = os.path.join(root, file)
-                rel_path = os.path.relpath(abs_path, DATA_DIR)
+                rel_path = os.path.relpath(abs_path, project_root)
                 zipf.write(abs_path, rel_path)
                 
-    logger.info("Zip created successfully.")
+        # 2. Backup Source Directory (Code)
+        src_dir = os.path.join(project_root, "src")
+        for root, dirs, files in os.walk(src_dir):
+            for file in files:
+                # Skip compiled python files
+                if "__pycache__" in root or file.endswith(".pyc"):
+                    continue
+                
+                abs_path = os.path.join(root, file)
+                rel_path = os.path.relpath(abs_path, project_root)
+                zipf.write(abs_path, rel_path)
+                
+    logger.info("Zip created successfully with both data/ and src/ directories.")
     return zip_path
 
 def authenticate_drive():
