@@ -22,9 +22,24 @@ class DecisionJournal:
         self.data_dir = Path(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../data')))
         self.parquet_path = self.data_dir / "decision_history.parquet"
         self.health_json = self.data_dir / "health_state.json"
+        self.wal_path = self.data_dir / "decision_wal.jsonl"
         
         self.buffer = []
         self.lock = threading.Lock()
+        self._recover_wal()
+        
+    def _recover_wal(self):
+        if self.wal_path.exists():
+            try:
+                with open(self.wal_path, 'r') as f:
+                    for line in f:
+                        if line.strip():
+                            self.buffer.append(json.loads(line))
+                if self.buffer:
+                    logger.info(f"Recovered {len(self.buffer)} decisions from WAL.")
+                    self._flush_buffer()
+            except Exception as e:
+                logger.error(f"Error recovering WAL: {e}")
         
     def _flush_buffer(self):
         with self.lock:
@@ -46,6 +61,8 @@ class DecisionJournal:
                 df_new.to_parquet(self.parquet_path, engine='pyarrow')
                 logger.info(f"Flushed {len(self.buffer)} decisions to journal.")
                 self.buffer = []
+                if self.wal_path.exists():
+                    os.remove(self.wal_path)
             except Exception as e:
                 logger.error(f"Error writing to parquet: {e}")
 
@@ -78,6 +95,11 @@ class DecisionJournal:
             
             with self.lock:
                 self.buffer.append(message)
+                try:
+                    with open(self.wal_path, 'a') as f:
+                        f.write(json.dumps(message) + '\n')
+                except Exception as e:
+                    logger.error(f"Error writing to WAL: {e}")
                 
             if len(self.buffer) >= 10:
                 self._flush_buffer()
@@ -96,6 +118,11 @@ class DecisionJournal:
                 }
                 with self.lock:
                     self.buffer.append(resolution_payload)
+                    try:
+                        with open(self.wal_path, 'a') as f:
+                            f.write(json.dumps(resolution_payload) + '\n')
+                    except Exception as e:
+                        logger.error(f"Error writing to WAL: {e}")
 
     def start(self):
         self.running = True

@@ -396,7 +396,11 @@ class BrainService:
                                     decision_state["machine_state"]["strategy_1_state"] = strat1_machine
                             
                         latest = self.current_df.iloc[-1]
-                        observation_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, str(latest['timestamp'])))
+                        
+                        # Fix Gap 5: Enforce exact string format match with Canonical Collector for deterministic UUID5
+                        clean_ts = pd.Timestamp(latest['timestamp']).replace(second=0, microsecond=0)
+                        observation_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, str(clean_ts)))
+                        
                         decision_uuid = str(uuid.uuid4())
                         
                         # Determine the decision status, noting if we ignored a valid signal due to current state
