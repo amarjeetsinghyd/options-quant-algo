@@ -55,6 +55,11 @@ class BrainService:
         self.cached_price_df = None
         self.current_df = None
         
+        # Async Fetch Architecture
+        self._df_lock = threading.Lock()
+        self._volume_fetch_thread = None
+        self._last_fetch_time = 0
+        
         self.current_minute_volume_tracker = {}
         self.last_known_vtt = {}
         self.live_volume_minute = datetime.now().minute
@@ -78,11 +83,15 @@ class BrainService:
     def boot_sequence(self):
         logger.info("=== BOOT: Building Synthetic Volume Engine (this takes ~35 seconds) ===")
         try:
+            from src.ml_engine.ml_db import init_ml_db
+            init_ml_db(recreate=False)
+            
             boot_df = self.fetcher.get_historical_candles_with_synthetic_volume(days_back=5)
             if not boot_df.empty:
                 self.cached_volume_df = boot_df.set_index('timestamp')[['volume']].rename(columns={'volume': 'synth_vol'})
                 self.cached_price_df = boot_df.set_index('timestamp')[['open', 'high', 'low', 'close']]
-                self.current_df = append_all_indicators(boot_df)
+                with self._df_lock:
+                    self.current_df = append_all_indicators(boot_df)
                 logger.info("=== BOOT COMPLETE: Synthetic Volume Engine Online ===")
         except Exception as e:
             logger.critical(f"BOOT ERROR: {e}")
@@ -265,6 +274,20 @@ class BrainService:
             }
         return {}
 
+    def _background_volume_fetch(self):
+        try:
+            new_price_df = self.fetcher.get_historical_candles(self.anchor_exch, self.anchor_token, "ONE_MINUTE", minutes_back=15)
+            if not new_price_df.empty:
+                new_price_df = new_price_df.set_index('timestamp')[['open', 'high', 'low', 'close']]
+                with self._df_lock:
+                    if self.cached_price_df is not None:
+                        self.cached_price_df = new_price_df.combine_first(self.cached_price_df)
+                    else:
+                        self.cached_price_df = new_price_df
+                    self._last_fetch_time = time.time()
+        except Exception as e:
+            logger.error(f"[BrainService] Background volume fetch error: {e}")
+
     def execute_logic_loop(self):
         """Runs on a separate thread to poll historical data and trigger logic."""
         import zmq # Needed for setsockopt in subscribe_options
@@ -281,12 +304,18 @@ class BrainService:
                 
                 # Fetch recent candles every 10 seconds to ensure consistency with broker
                 if now_ts - self.last_historic_fetch >= 10:
-                    try:
-                        new_price_df = self.fetcher.get_historical_candles(self.anchor_exch, self.anchor_token, "ONE_MINUTE", minutes_back=15)
-                        if not new_price_df.empty and self.cached_volume_df is not None:
-                            new_price_df = new_price_df.set_index('timestamp')[['open', 'high', 'low', 'close']]
-                            self.cached_price_df = new_price_df.combine_first(self.cached_price_df)
-                            
+                    if not self._volume_fetch_thread or not self._volume_fetch_thread.is_alive():
+                        self._volume_fetch_thread = threading.Thread(
+                            target=self._background_volume_fetch, daemon=True
+                        )
+                        self._volume_fetch_thread.start()
+                    else:
+                        logger.warning("[BrainService] Overlap guard: Previous background fetch is still running.")
+                    self.last_historic_fetch = now_ts
+                
+                try:
+                    with self._df_lock:
+                        if self.cached_price_df is not None and self.cached_volume_df is not None:
                             price_df = self.cached_price_df.copy().join(self.cached_volume_df, how='left')
                             price_df['volume'] = price_df['synth_vol'].fillna(0).astype(int)
                             price_df = price_df.drop(columns=['synth_vol']).reset_index()
@@ -376,8 +405,15 @@ class BrainService:
                     
                     # ── GAP 1 FIX: ALWAYS EVALUATE SIGNALS DURING TRADING WINDOW ──
                     is_trading_window = (now.hour > 10 or (now.hour == 10 and now.minute >= 0)) and (now.hour < 15 or (now.hour == 15 and now.minute < 15))
+                    is_stale = (now_ts - self._last_fetch_time) > 180  # 3 minutes stale
+                    
                     if is_trading_window:
-                        if self.trader.cooldown_until and now < self.trader.cooldown_until:
+                        if is_stale:
+                            signal, decision_state = None, {
+                                "human_reason": f"Data stale by {int(now_ts - self._last_fetch_time)}s. Degraded mode.",
+                                "machine_state": {}
+                            }
+                        elif self.trader.cooldown_until and now < self.trader.cooldown_until:
                             signal, decision_state = None, {
                                 "human_reason": f"Active Cooldown until {self.trader.cooldown_until.strftime('%H:%M:%S')}",
                                 "machine_state": {}

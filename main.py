@@ -40,6 +40,9 @@ if os.path.exists("trade_history.json"):
             history_data = json.load(f)
     except: pass
 
+# Auditor Fix: Module-level telemetry cache
+_telemetry_cache = {}
+
 # UI State Dictionary
 state = {
     "status": "running",
@@ -54,10 +57,11 @@ state = {
 
 def on_exec_message(topic, payload):
     """Callback for messages coming from the Brain Service via ZeroMQ."""
-    global state
+    global state, _telemetry_cache
     
     if topic == "EXEC.TELEMETRY":
-        state["telemetry"].update(payload)
+        _telemetry_cache.update(payload)
+        state["telemetry"] = _telemetry_cache
         
     elif topic == "EXEC.ACTIVE_TRADE":
         state["active_trade"] = payload
@@ -99,6 +103,8 @@ def intelligence_lab():
 
 @app.route('/api/status')
 def get_status():
+    # Serve from the module-level cache to ensure browser refresh doesn't blank
+    state["telemetry"] = _telemetry_cache
     return jsonify(state)
 
 @app.route('/api/chart_data')
