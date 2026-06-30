@@ -93,13 +93,15 @@ class DecisionJournal:
                 message["market_state_json"] = json.dumps(message["market_state"])
                 del message["market_state"]
             
+            wal_line = json.dumps(message) + '\n'
             with self.lock:
                 self.buffer.append(message)
-                try:
-                    with open(self.wal_path, 'a') as f:
-                        f.write(json.dumps(message) + '\n')
-                except Exception as e:
-                    logger.error(f"Error writing to WAL: {e}")
+            # WAL write is outside the lock: disk I/O must never block the flush thread
+            try:
+                with open(self.wal_path, 'a') as f:
+                    f.write(wal_line)
+            except Exception as e:
+                logger.error(f"Error writing to WAL: {e}")
                 
             if len(self.buffer) >= 10:
                 self._flush_buffer()
@@ -116,13 +118,15 @@ class DecisionJournal:
                     "resolution_price": message.get("price", 0.0),
                     "is_execution_update": True
                 }
+                wal_line = json.dumps(resolution_payload) + '\n'
                 with self.lock:
                     self.buffer.append(resolution_payload)
-                    try:
-                        with open(self.wal_path, 'a') as f:
-                            f.write(json.dumps(resolution_payload) + '\n')
-                    except Exception as e:
-                        logger.error(f"Error writing to WAL: {e}")
+                # WAL write is outside the lock: disk I/O must never block the flush thread
+                try:
+                    with open(self.wal_path, 'a') as f:
+                        f.write(wal_line)
+                except Exception as e:
+                    logger.error(f"Error writing to WAL: {e}")
 
     def start(self):
         self.running = True
