@@ -402,11 +402,11 @@ class BrainService:
                                             logger.debug(f"Option prefetch error: {e}")
                                             
                                     threading.Thread(target=prefetch_options, args=(tokens_to_sub,), daemon=True).start()
-                                        
+                                
                                 self.last_option_refresh = now_ts
                                 
-                    except Exception as e:
-                        logger.error(f"[BrainService] Error in loop: {e}")
+                except Exception as e:
+                    logger.error(f"[BrainService] Error in loop: {e}")
                     
                 # Signal Generation & Execution
                 if self.current_df is not None:

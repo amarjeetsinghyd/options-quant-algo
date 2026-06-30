@@ -101,8 +101,11 @@ class ProcessSupervisor:
     def start_service(self, name: str, command: List[str]):
         """Start a single service."""
         try:
+            env = os.environ.copy()
+            env["PYTHONPATH"] = os.path.dirname(os.path.abspath(__file__))
             proc = subprocess.Popen(
                 command,
+                env=env
                 # Remove PIPE to prevent OS buffer deadlocks (processes freezing after 64KB output).
                 # The children will inherit stdout/stderr from start_all.py directly.
             )
