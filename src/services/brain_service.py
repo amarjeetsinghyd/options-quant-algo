@@ -385,7 +385,15 @@ class BrainService:
                         else:
                             signal, decision_state = self.signal_gen.check_signal(self.current_df)
                             if not signal: 
+                                strat1_reason = decision_state.get("human_reason", "Strategy 1 failed")
+                                strat1_machine = decision_state.get("machine_state", {})
+                                
                                 signal, decision_state = self.signal_gen.check_rejection_signal(self.current_df)
+                                if not signal:
+                                    # Both strategies failed. Combine their rejection states.
+                                    strat2_reason = decision_state.get("human_reason", "Strategy 2 failed")
+                                    decision_state["human_reason"] = f"S1: {strat1_reason} | S2: {strat2_reason}"
+                                    decision_state["machine_state"]["strategy_1_state"] = strat1_machine
                             
                         latest = self.current_df.iloc[-1]
                         observation_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, str(latest['timestamp'])))
