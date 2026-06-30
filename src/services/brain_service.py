@@ -374,54 +374,65 @@ class BrainService:
                     pending_signal = self.trader.pending_setup.copy() if was_pending else None
                     was_trade = self.trader.current_trade is not None
                     
-                    if self.trader.current_trade is None and self.trader.pending_setup is None:
-                        # TRADING WINDOW: 10:00 AM to 3:15 PM
-                        is_trading_window = (now.hour > 10 or (now.hour == 10 and now.minute >= 0)) and (now.hour < 15 or (now.hour == 15 and now.minute < 15))
-                        if is_trading_window:
-                            if self.trader.cooldown_until and now < self.trader.cooldown_until:
-                                signal, decision_state = None, {
-                                    "human_reason": f"Active Cooldown until {self.trader.cooldown_until.strftime('%H:%M:%S')}",
-                                    "machine_state": {}
-                                }
-                            else:
-                                signal, decision_state = self.signal_gen.check_signal(self.current_df)
-                                if not signal: 
-                                    signal, decision_state = self.signal_gen.check_rejection_signal(self.current_df)
-                                
-                            latest = self.current_df.iloc[-1]
-                            observation_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, str(latest['timestamp'])))
-                            decision_uuid = str(uuid.uuid4())
-                            
-                            decision_payload = {
-                                "decision_uuid": decision_uuid,
-                                "observation_uuid": observation_uuid,
-                                "timestamp": datetime.now().isoformat(),
-                                "market_session_id": datetime.now().strftime("%Y-%m-%d"),
-                                "decision_action": "BUY" if signal and signal.get("type")=="CALL" else "SELL" if signal else "NONE",
-                                "status": "ACCEPTED" if signal else "REJECTED",
-                                "trade_mode": "Paper Trade",
-                                "human_reason": decision_state.get("human_reason", ""),
-                                "machine_state": decision_state.get("machine_state", {}),
-                                "strategy_version": "3.1",
-                                "market_state": {
-                                    "vfi": float(latest.get('vfi', 0)),
-                                    "vwap": float(latest.get('vwap', 0)),
-                                    "ema_9": float(latest.get('ema_9', 0))
-                                }
+                    # ── GAP 1 FIX: ALWAYS EVALUATE SIGNALS DURING TRADING WINDOW ──
+                    is_trading_window = (now.hour > 10 or (now.hour == 10 and now.minute >= 0)) and (now.hour < 15 or (now.hour == 15 and now.minute < 15))
+                    if is_trading_window:
+                        if self.trader.cooldown_until and now < self.trader.cooldown_until:
+                            signal, decision_state = None, {
+                                "human_reason": f"Active Cooldown until {self.trader.cooldown_until.strftime('%H:%M:%S')}",
+                                "machine_state": {}
                             }
-                            self.exec_pub.publish("EXEC.DECISION", decision_payload)
-                                
-                            if signal:
-                                signal["signal_id"] = str(uuid.uuid4())
-                                signal["decision_uuid"] = decision_uuid
-                                self.trader.register_setup(signal)
-                                # Publish setup to exec port for UI
-                                self.exec_pub.publish("EXEC.SETUP", signal)
-                                
-                    elif self.trader.pending_setup is not None:
+                        else:
+                            signal, decision_state = self.signal_gen.check_signal(self.current_df)
+                            if not signal: 
+                                signal, decision_state = self.signal_gen.check_rejection_signal(self.current_df)
+                            
+                        latest = self.current_df.iloc[-1]
+                        observation_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, str(latest['timestamp'])))
+                        decision_uuid = str(uuid.uuid4())
+                        
+                        # Determine the decision status, noting if we ignored a valid signal due to current state
+                        if signal:
+                            if self.trader.current_trade is not None:
+                                decision_status = "IGNORED_OPEN_TRADE"
+                            elif self.trader.pending_setup is not None:
+                                decision_status = "IGNORED_SNIPER_MODE"
+                            else:
+                                decision_status = "ACCEPTED"
+                        else:
+                            decision_status = "REJECTED"
+                        
+                        decision_payload = {
+                            "decision_uuid": decision_uuid,
+                            "observation_uuid": observation_uuid,
+                            "timestamp": datetime.now().isoformat(),
+                            "market_session_id": datetime.now().strftime("%Y-%m-%d"),
+                            "decision_action": "BUY" if signal and signal.get("type")=="CALL" else "SELL" if signal else "NONE",
+                            "status": decision_status,
+                            "trade_mode": "Paper Trade",
+                            "human_reason": decision_state.get("human_reason", ""),
+                            "machine_state": decision_state.get("machine_state", {}),
+                            "strategy_version": "3.1",
+                            "market_state": {
+                                "vfi": float(latest.get('vfi', 0)),
+                                "vwap": float(latest.get('vwap', 0)),
+                                "ema_9": float(latest.get('ema_9', 0))
+                            }
+                        }
+                        self.exec_pub.publish("EXEC.DECISION", decision_payload)
+                            
+                        # Only register setup if we accepted it (flat state)
+                        if signal and decision_status == "ACCEPTED":
+                            signal["signal_id"] = str(uuid.uuid4())
+                            signal["decision_uuid"] = decision_uuid
+                            self.trader.register_setup(signal)
+                            # Publish setup to exec port for UI
+                            self.exec_pub.publish("EXEC.SETUP", signal)
+                            
+                    # ── MANAGE ACTIVE TRADES / SETUPS ──
+                    if self.trader.pending_setup is not None:
                         # Sniper mode
                         self.trader.sniper_hunt(self.live_ltp, self.current_df, self.order_flow)
-                        
                     elif self.trader.current_trade is not None:
                         self.trader.manage_open_trade(self.live_ltp, self.current_df)
                         
