@@ -11,6 +11,7 @@ from src.core.angel_connection import get_angel_connection, get_websocket_connec
 from src.core.data_fetcher import DataFetcher
 from src.core.message_bus import MessageBusPublisher, MessageBusSubscriber, FEED_PORT, CMD_PORT
 from src.core.market_calendar import MarketCalendar
+from src.core.symbol_registry import SymbolRegistry
 from src.utils.logger import get_logger
 
 logger = get_logger("feed_service")
@@ -18,6 +19,8 @@ logger = get_logger("feed_service")
 class FeedService:
     def __init__(self):
         self.pub = MessageBusPublisher(FEED_PORT)
+        # Load the registry once (Singleton) — O(1) token→symbol lookup for all ticks
+        self.registry = SymbolRegistry()
         
         try:
             self.api, session_data = get_angel_connection()
@@ -87,7 +90,12 @@ class FeedService:
         if isinstance(message, dict):
             token = message.get("token")
             if token:
-                # Publish tick to ZeroMQ
+                # Enrich tick with universal symbol before publishing.
+                # This is the single injection point that makes ALL downstream
+                # services (brain, canonical, gamma) broker-agnostic.
+                # Fallback: use the symbol field from the broker tick if present.
+                broker_symbol = message.get("symbol", "")
+                message["symbol"] = self.registry.get_symbol(str(token), broker_symbol)
                 self.pub.publish(f"TICK.{token}", message)
 
     def on_error(self, wsapp, error):
