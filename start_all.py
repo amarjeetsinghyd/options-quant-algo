@@ -63,10 +63,21 @@ SERVICES = [
         "command": [sys.executable, "src/services/decision_journal.py"],
         "restart_on_failure": True,
     },
+    {
+        "name": "shadow_service",
+        "command": [sys.executable, "src/services/shadow_service.py"],
+        "restart_on_failure": True,
+    },
+    {
+        "name": "cloud_backup",
+        "command": [sys.executable, "src/services/cloud_backup.py"],
+        "restart_on_failure": True,
+    },
 ]
 
 RESTART_DELAY_SECONDS = 5
 MAX_RESTARTS = 3
+MAX_RESTART_WINDOW_SECONDS = 300
 
 
 class ProcessSupervisor:
@@ -79,6 +90,7 @@ class ProcessSupervisor:
         self.services = services
         self.processes: Dict[str, subprocess.Popen] = {}
         self.restart_counts: Dict[str, int] = {}
+        self.restart_timestamps: Dict[str, List[float]] = {}
         self._shutdown = False
 
     def start_all(self):
@@ -120,28 +132,39 @@ class ProcessSupervisor:
                     else:
                         del self.processes[name]
 
-            # Autonomous 4:00 PM Shutdown
+            # Autonomous Shutdown at Configured Time
             now = datetime.now()
-            if now.hour >= 16:
-                logger.info("Market Closed (4:00 PM). Autonomous Shutdown Initiated.")
+            from src.config.engineering_config import MARKET_CLOSE_HOUR, MARKET_CLOSE_MINUTE
+            if now.hour > MARKET_CLOSE_HOUR or (now.hour == MARKET_CLOSE_HOUR and now.minute >= MARKET_CLOSE_MINUTE):
+                logger.info(f"Market Closed ({MARKET_CLOSE_HOUR}:{MARKET_CLOSE_MINUTE:02d}). Autonomous Shutdown Initiated.")
                 self.shutdown()
                 break
 
     def handle_restart(self, svc: Dict):
-        """Restart a service if it hasn't exceeded max restarts."""
+        """Restart a service using exponential backoff inside a rolling window."""
         name = svc["name"]
-        count = self.restart_counts.get(name, 0)
+        now = time.time()
+        
+        timestamps = self.restart_timestamps.setdefault(name, [])
+        timestamps = [ts for ts in timestamps if now - ts < MAX_RESTART_WINDOW_SECONDS]
+        self.restart_timestamps[name] = timestamps
+        
+        count = len(timestamps)
+        
         if count >= MAX_RESTARTS:
             logger.error(
-                "%s exceeded max restarts (%d). Not restarting.",
-                name, MAX_RESTARTS
+                "%s exceeded max restarts (%d) within %ds. Not restarting.",
+                name, MAX_RESTARTS, MAX_RESTART_WINDOW_SECONDS
             )
             return
 
-        self.restart_counts[name] = count + 1
-        logger.info("Restarting %s in %ds (attempt %d/%d)...",
-                    name, RESTART_DELAY_SECONDS, count + 1, MAX_RESTARTS)
-        time.sleep(RESTART_DELAY_SECONDS)
+        self.restart_timestamps[name].append(now)
+        
+        delay = RESTART_DELAY_SECONDS * (2 ** count)
+        
+        logger.info("Restarting %s in %ds (attempt %d/%d in window)...",
+                    name, delay, count + 1, MAX_RESTARTS)
+        time.sleep(delay)
         self.start_service(name, svc["command"])
 
     def shutdown(self):

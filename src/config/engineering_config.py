@@ -11,6 +11,17 @@ LOGS_DIR = os.path.join(BASE_DIR, "logs")
 ML_DB_PATH = os.path.join(DATA_DIR, "ml_research.db")
 STRIKE_DB_PATH = os.path.join(DATA_DIR, "strike_research.db")
 DUCKDB_PATH = os.path.join(DATA_DIR, "ml_analytics.duckdb")
+INSTITUTIONAL_MEMORY_DIR = os.path.join(DATA_DIR, "institutional_memory")
+
+# Market Time
+MARKET_CLOSE_HOUR = 15
+MARKET_CLOSE_MINUTE = 30
+
+# Premium Bounds
+NIFTY_PREMIUM_MIN = 22
+NIFTY_PREMIUM_MAX = 27
+SENSEX_PREMIUM_MIN = 60
+SENSEX_PREMIUM_MAX = 70
 
 # Performance & Profiling Instrumentation
 PROFILING_ENABLED = False
@@ -20,6 +31,7 @@ SYSTEM_METRICS_INTERVAL = 5  # seconds
 # DO NOT change without updating DOC-1.2 version
 
 # Core services
+STRATEGY_VERSION = "3.1"
 ENABLE_TRADING_BOT = True
 ENABLE_RESEARCH_COLLECTOR = True
 ENABLE_ZMQ_BUS = True

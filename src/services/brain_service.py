@@ -22,6 +22,7 @@ from src.core.message_bus import MessageBusPublisher, MessageBusSubscriber, FEED
 from src.utils.logger import get_logger
 from src.ml_engine.gamma_event_collector import GammaEventCollector
 from src.research.strike_intelligence import StrikeIntelligenceModule
+from src.config.engineering_config import STRATEGY_VERSION
 
 logger = get_logger("brain_service")
 
@@ -121,9 +122,10 @@ class BrainService:
 
             df = pd.DataFrame([closed_candle])
 
-            # Save to: data/institutional_memory/indicator_stream/YYYY/MM/DD/indicators_HHMM.parquet
+            # Save to: INSTITUTIONAL_MEMORY_DIR/indicator_stream/YYYY/MM/DD/indicators_HHMM.parquet
             date_str = now.strftime("%Y/%m/%d")
-            save_dir = Path("data/institutional_memory/indicator_stream") / date_str
+            from src.config.engineering_config import INSTITUTIONAL_MEMORY_DIR
+            save_dir = Path(INSTITUTIONAL_MEMORY_DIR) / "indicator_stream" / date_str
             save_dir.mkdir(parents=True, exist_ok=True)
 
             file_name = f"indicators_{now.strftime('%H%M')}.parquet"
@@ -290,7 +292,6 @@ class BrainService:
 
     def execute_logic_loop(self):
         """Runs on a separate thread to poll historical data and trigger logic."""
-        import zmq # Needed for setsockopt in subscribe_options
         # Wait for boot
         while self.cached_price_df is None:
             time.sleep(1)
@@ -387,15 +388,25 @@ class BrainService:
                                     self.tracked_options = tracked
                                     self.cmd_pub.publish("CMD.SUBSCRIBE", {"tokens": tokens_to_sub, "exchange": "NFO"})
                                     
-                                    # Manually set sock opts here
+                                    # Safely queue subscriptions to the feed thread
                                     for tk in tokens_to_sub:
-                                        self.feed_sub.socket.setsockopt_string(zmq.SUBSCRIBE, f"TICK.{tk}")
+                                        self.feed_sub.add_subscription(f"TICK.{tk}")
+                                        
+                                    # H2: Pre-cache LTPs for Trader asynchronously
+                                    def prefetch_options(tokens):
+                                        try:
+                                            resp = self.fetcher.api.marketData("LTP", {exch_seg: tokens})
+                                            if resp and resp.get('status') and resp.get('data'):
+                                                self.trader.update_option_cache(resp['data'].get('fetched', []))
+                                        except Exception as e:
+                                            logger.debug(f"Option prefetch error: {e}")
+                                            
+                                    threading.Thread(target=prefetch_options, args=(tokens_to_sub,), daemon=True).start()
                                         
                                 self.last_option_refresh = now_ts
                                 
                     except Exception as e:
                         logger.error(f"[BrainService] Error in loop: {e}")
-                    self.last_historic_fetch = now_ts
                     
                 # Signal Generation & Execution
                 if self.current_df is not None:
@@ -460,7 +471,7 @@ class BrainService:
                             "trade_mode": "Paper Trade",
                             "human_reason": decision_state.get("human_reason", ""),
                             "machine_state": decision_state.get("machine_state", {}),
-                            "strategy_version": "3.1",
+                            "strategy_version": STRATEGY_VERSION,
                             "market_state": {
                                 "vfi": float(latest.get('vfi', 0)),
                                 "vwap": float(latest.get('vwap', 0)),

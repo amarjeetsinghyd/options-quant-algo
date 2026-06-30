@@ -20,8 +20,12 @@ class PaperTrader:
         self.cooldown_until = None
         self.last_trade_date = None
         self.history_list = history_list if history_list is not None else []
-        self.history_file = "trade_history.json"
-        self.depth_file = "slippage_data.json"
+        self._option_cache = {}
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        trades_dir = os.path.join(base_dir, "data", "trades")
+        os.makedirs(trades_dir, exist_ok=True)
+        self.history_file = os.path.join(trades_dir, "trade_history.json")
+        self.depth_file = os.path.join(trades_dir, "slippage_data.ndjson")
         
         # Load history from JSON if it exists
         if os.path.exists(self.history_file):
@@ -53,11 +57,12 @@ class PaperTrader:
             self.cooldown_until = None
 
     def get_instrument_params(self):
+        from src.config.engineering_config import NIFTY_PREMIUM_MIN, NIFTY_PREMIUM_MAX, SENSEX_PREMIUM_MIN, SENSEX_PREMIUM_MAX
         name, exch_seg = self.data_fetcher.get_active_instrument()
         if name == "SENSEX":
-            return {"premium_min": 60, "premium_max": 70, "lot_size": 20, "index_name": "SENSEX"}
+            return {"premium_min": SENSEX_PREMIUM_MIN, "premium_max": SENSEX_PREMIUM_MAX, "lot_size": 20, "index_name": "SENSEX"}
         else:
-            return {"premium_min": 22, "premium_max": 27, "lot_size": 25, "index_name": "NIFTY"}
+            return {"premium_min": NIFTY_PREMIUM_MIN, "premium_max": NIFTY_PREMIUM_MAX, "lot_size": 25, "index_name": "NIFTY"}
 
     def register_setup(self, signal):
         self.reset_daily()
@@ -121,6 +126,10 @@ class PaperTrader:
                 logger.info(f"!!! FAKE BREAKOUT DETECTED !!! Live price {live_ltp} broke Master Setup, but Candidate Delta is NEGATIVE or FLAT ({delta}). Trade Aborted.")
                 self.pending_setup = None
 
+    def update_option_cache(self, fetched_data):
+        """Update local cache with latest option LTPs"""
+        self._option_cache = {item['symbolToken']: item['ltp'] for item in fetched_data}
+
     def select_option(self, signal_type):
         weekly_opts = self.data_fetcher.get_weekly_option_tokens()
         opt_type = "CE" if signal_type == "CALL" else "PE"
@@ -131,24 +140,13 @@ class PaperTrader:
         entry_price = 0
         params = self.get_instrument_params()
         
-        chunk_size = 50
         valid_candidates = []
-        for i in range(0, len(tokens), chunk_size):
-            chunk = tokens[i:i+chunk_size]
-            try:
-                name, exch_seg = self.data_fetcher.get_active_instrument()
-                market_response = self.api.marketData("LTP", {exch_seg: chunk})
-                if market_response and market_response.get('status') and market_response.get('data'):
-                    fetched = market_response['data'].get('fetched', [])
-                    for item in fetched:
-                        ltp = item['ltp']
-                        if params["premium_min"] <= ltp <= params["premium_max"]:
-                            valid_candidates.append({
-                                'token': item['symbolToken'],
-                                'ltp': ltp
-                            })
-            except Exception as e:
-                pass
+        for token_id, ltp in self._option_cache.items():
+            if token_id in tokens and params["premium_min"] <= ltp <= params["premium_max"]:
+                valid_candidates.append({
+                    'token': token_id,
+                    'ltp': ltp
+                })
                 
         # If we found valid candidates, pick the one closest to the max premium
         if valid_candidates:
@@ -260,7 +258,8 @@ class PaperTrader:
             "strategy": strategy,
             "status": "OPEN",
             "slippage": depth_data,
-            "start_time": time.time()
+            "start_time": time.time(),
+            "decision_uuid": setup.get("decision_uuid")
         }
         
         self.trades_today += 1
@@ -391,12 +390,15 @@ class PaperTrader:
             "chart": f"/static/charts/{chart_file}",
             "reason": reason,
             "result": result,
-            "slippage": t.get("slippage", {})
+            "slippage": t.get("slippage", {}),
+            "decision_uuid": t.get("decision_uuid")
         })
         
-        # Save JSON file
-        with open(self.history_file, 'w', encoding='utf-8') as f:
+        # Save JSON file (Atomic write)
+        temp_file = self.history_file + ".tmp"
+        with open(temp_file, 'w', encoding='utf-8') as f:
             json.dump(self.history_list, f, indent=4)
+        os.replace(temp_file, self.history_file)
         
         logger.info(f"--- TRADE CLOSED ---")
         logger.info(f"Result: {result} | P&L: ₹{round(net_pl, 2)}")
