@@ -256,17 +256,19 @@ class SignalGenerator:
         latest = df.iloc[-1]
         prev = df.iloc[-2]
         
-        # Check CALL: Cross above vwap_low and vfi > 0
+        # Check CALL: Cross above vwap_low, cover 30% of band, and vfi > 0
+        call_required_close = latest['vwap_low'] + 0.30 * (latest['vwap'] - latest['vwap_low'])
         call_trigger = bool(
-            latest['close'] > latest['vwap_low'] and 
-            prev['close'] <= prev['vwap_low'] and 
+            latest['close'] >= call_required_close and 
+            prev['close'] <= latest['vwap_low'] and 
             latest['vfi'] > 0
         )
         
-        # Check PUT: Cross below vwap_high and vfi < 0
+        # Check PUT: Cross below vwap_high, cover 30% of band, and vfi < 0
+        put_required_close = latest['vwap_high'] - 0.30 * (latest['vwap_high'] - latest['vwap'])
         put_trigger = bool(
-            latest['close'] < latest['vwap_high'] and 
-            prev['close'] >= prev['vwap_high'] and 
+            latest['close'] <= put_required_close and 
+            prev['close'] >= latest['vwap_high'] and 
             latest['vfi'] < 0
         )
         
