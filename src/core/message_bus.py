@@ -1,6 +1,7 @@
 import zmq
 import json
 import threading
+import queue
 from typing import Callable, Any
 from src.utils.logger import get_logger
 
@@ -69,6 +70,11 @@ class MessageBusSubscriber:
             raise e
             
         self._stop_event = threading.Event()
+        self._subscription_queue = queue.Queue()
+
+    def add_subscription(self, topic: str):
+        """Thread-safe way to add a subscription topic"""
+        self._subscription_queue.put(topic)
 
     def listen(self, callback: Callable[[str, dict], None]):
         """
@@ -80,6 +86,14 @@ class MessageBusSubscriber:
         
         while not self._stop_event.is_set():
             try:
+                # Process pending subscriptions safely on the listening thread
+                while not self._subscription_queue.empty():
+                    try:
+                        new_topic = self._subscription_queue.get_nowait()
+                        self.socket.setsockopt_string(zmq.SUBSCRIBE, new_topic)
+                    except queue.Empty:
+                        break
+                        
                 socks = dict(poller.poll(1000))  # 1000ms timeout
                 
                 if self.socket in socks and socks[self.socket] == zmq.POLLIN:

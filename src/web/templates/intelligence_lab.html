@@ -582,7 +582,7 @@
             <span class="tag tag-live">signal_generator.py</span>
         </div>
 
-        <div class="panel-grid-2">
+        <div class="panel-grid-3">
             <div class="card">
                 <div class="card-header">
                     <div class="card-title"><ion-icon name="flash-outline"></ion-icon> Strategy 1 — Window Alignment (10m Breakout)</div>
@@ -639,6 +639,34 @@
                     <div class="metric-row">
                         <span class="metric-key">Execution</span>
                         <span class="metric-val" style="font-size: 11px; color: var(--text2);">Same sniper entry after signal</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title"><ion-icon name="expand-outline"></ion-icon> Strategy 3 — VWAP Band Breakout</div>
+                </div>
+                <div class="card-body">
+                    <div class="metric-row">
+                        <span class="metric-key">Trigger (CALL)</span>
+                        <span class="metric-val" style="font-size: 11px; color: var(--text2);">Close > Low VWAP AND VFI > 0</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-key">Trigger (PUT)</span>
+                        <span class="metric-val" style="font-size: 11px; color: var(--text2);">Close &lt; High VWAP AND VFI &lt; 0</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-key">Penetration Filter</span>
+                        <span class="metric-val" style="font-size: 11px; color: var(--text2);">Price crosses ≥30% into the band</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-key">Risk / SL</span>
+                        <span class="metric-val" style="font-size: 11px; color: var(--text2);">3-minute time-based Stop Loss</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-key">Execution</span>
+                        <span class="metric-val" style="font-size: 11px; color: var(--text2);">Fixed 10% target</span>
                     </div>
                 </div>
             </div>

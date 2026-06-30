@@ -1,6 +1,9 @@
 @echo off
 title Autonomous Quant Engine
-echo Booting Autonomous Quant Engine...
+echo Booting Autonomous Quant Engine in Background via PM2...
 cd /d "C:\Users\Amarjeet Singh\quant_algo_test"
-set POLARS_IGNORE_TIMEZONE_PARSE_ERROR=1
-"C:\Users\Amarjeet Singh\quant_algo_test\venv\Scripts\python.exe" start_all.py > boot_error.log 2>&1
+pm2 start ecosystem.config.js
+pm2 save
+echo Quant Engine has been started in the background.
+echo You can now close this window safely.
+timeout /t 5 >nul
