@@ -437,11 +437,15 @@ class BrainService:
                                 
                                 signal, decision_state = self.signal_gen.check_rejection_signal(self.current_df)
                                 if not signal:
-                                    # Both strategies failed. Combine their rejection states.
                                     strat2_reason = decision_state.get("human_reason", "Strategy 2 failed")
-                                    decision_state["human_reason"] = f"S1: {strat1_reason} | S2: {strat2_reason}"
-                                    decision_state["machine_state"]["strategy_1_state"] = strat1_machine
-                            
+                                    strat2_machine = decision_state.get("machine_state", {})
+                                    
+                                    signal, decision_state = self.signal_gen.check_vwap_band_breakout_signal(self.current_df)
+                                    if not signal:
+                                        strat3_reason = decision_state.get("human_reason", "Strategy 3 failed")
+                                        decision_state["human_reason"] = f"S1: {strat1_reason} | S2: {strat2_reason} | S3: {strat3_reason}"
+                                        decision_state["machine_state"]["strategy_1_state"] = strat1_machine
+                                        decision_state["machine_state"]["strategy_2_state"] = strat2_machine
                         latest = self.current_df.iloc[-1]
                         
                         # Fix Gap 5: Enforce exact string format match with Canonical Collector for deterministic UUID5

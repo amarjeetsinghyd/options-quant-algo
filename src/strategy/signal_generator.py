@@ -53,7 +53,7 @@ class SignalGenerator:
                 
             decision_state["machine_state"]["anchor_found"] = True
             anchor_idx_loc = cross_up_window[cross_up_window].index[-1]
-            analysis_window = df.loc[anchor_idx_loc:]
+            analysis_window = df.iloc[df.index.get_loc(anchor_idx_loc):]
             
             green_bodies = analysis_window[analysis_window['close'] > analysis_window['open']]['real_body']
             red_bodies = analysis_window[analysis_window['close'] < analysis_window['open']]['real_body']
@@ -94,7 +94,7 @@ class SignalGenerator:
                 
             decision_state["machine_state"]["anchor_found"] = True
             anchor_idx_loc = cross_dn_window[cross_dn_window].index[-1]
-            analysis_window = df.loc[anchor_idx_loc:]
+            analysis_window = df.iloc[df.index.get_loc(anchor_idx_loc):]
             
             green_bodies = analysis_window[analysis_window['close'] > analysis_window['open']]['real_body']
             red_bodies = analysis_window[analysis_window['close'] < analysis_window['open']]['real_body']
@@ -169,7 +169,7 @@ class SignalGenerator:
                 
             decision_state["machine_state"]["anchor_found"] = True
             anchor_idx_loc = anchor_window[anchor_window].index[-1]
-            analysis_window = df.loc[anchor_idx_loc:]
+            analysis_window = df.iloc[df.index.get_loc(anchor_idx_loc):]
             
             green_bodies = analysis_window[analysis_window['close'] > analysis_window['open']]['real_body']
             red_bodies = analysis_window[analysis_window['close'] < analysis_window['open']]['real_body']
@@ -208,7 +208,7 @@ class SignalGenerator:
                 
             decision_state["machine_state"]["anchor_found"] = True
             anchor_idx_loc = anchor_window[anchor_window].index[-1]
-            analysis_window = df.loc[anchor_idx_loc:]
+            analysis_window = df.iloc[df.index.get_loc(anchor_idx_loc):]
             
             green_bodies = analysis_window[analysis_window['close'] > analysis_window['open']]['real_body']
             red_bodies = analysis_window[analysis_window['close'] < analysis_window['open']]['real_body']
@@ -232,6 +232,73 @@ class SignalGenerator:
             signal = {
                 "type": "PUT",
                 "strategy": "REJECTION_WINDOW",
+                "master_high": float(latest['high']),
+                "master_low": float(latest['low']),
+                "timestamp": latest['timestamp'].isoformat() if hasattr(latest['timestamp'], 'isoformat') else str(latest['timestamp'])
+            }
+            return signal, decision_state
+            
+        return None, decision_state
+
+    def check_vwap_band_breakout_signal(self, df):
+        """
+        VWAP Band Breakout Strategy (Strategy 3).
+        CALL: Price crosses above vwap_low AND vfi > 0.
+        PUT: Price crosses below vwap_high AND vfi < 0.
+        """
+        decision_state = {
+            "human_reason": "Not enough data",
+            "machine_state": {"bars": len(df)}
+        }
+        if len(df) < 2:
+            return None, decision_state
+            
+        latest = df.iloc[-1]
+        prev = df.iloc[-2]
+        
+        # Check CALL: Cross above vwap_low and vfi > 0
+        call_trigger = bool(
+            latest['close'] > latest['vwap_low'] and 
+            prev['close'] <= prev['vwap_low'] and 
+            latest['vfi'] > 0
+        )
+        
+        # Check PUT: Cross below vwap_high and vfi < 0
+        put_trigger = bool(
+            latest['close'] < latest['vwap_high'] and 
+            prev['close'] >= prev['vwap_high'] and 
+            latest['vfi'] < 0
+        )
+        
+        decision_state["machine_state"].update({
+            "call_trigger_attempt": call_trigger,
+            "put_trigger_attempt": put_trigger,
+            "latest_close": float(latest['close']),
+            "latest_vwap_low": float(latest['vwap_low']),
+            "latest_vwap_high": float(latest['vwap_high']),
+            "latest_vfi": float(latest['vfi'])
+        })
+        
+        if not (call_trigger or put_trigger):
+            decision_state["human_reason"] = "Conditions not aligned for VWAP band breakout"
+            return None, decision_state
+            
+        if call_trigger:
+            decision_state["human_reason"] = "Conditions met for CALL VWAP Band Breakout"
+            signal = {
+                "type": "CALL",
+                "strategy": "VWAP_BAND_BREAKOUT",
+                "master_high": float(latest['high']),
+                "master_low": float(latest['low']),
+                "timestamp": latest['timestamp'].isoformat() if hasattr(latest['timestamp'], 'isoformat') else str(latest['timestamp'])
+            }
+            return signal, decision_state
+            
+        if put_trigger:
+            decision_state["human_reason"] = "Conditions met for PUT VWAP Band Breakout"
+            signal = {
+                "type": "PUT",
+                "strategy": "VWAP_BAND_BREAKOUT",
                 "master_high": float(latest['high']),
                 "master_low": float(latest['low']),
                 "timestamp": latest['timestamp'].isoformat() if hasattr(latest['timestamp'], 'isoformat') else str(latest['timestamp'])
