@@ -424,7 +424,16 @@ class BrainService:
                             "market_state": {
                                 "vfi": float(latest.get('vfi', 0)),
                                 "vwap": float(latest.get('vwap', 0)),
-                                "ema_9": float(latest.get('ema_9', 0))
+                                "ema_9": float(latest.get('ema_9', 0)),
+                                "atr": float(latest.get('atr', 0.0)),
+                                "atr_expansion": float(latest.get('atr_expansion', 1.0)),
+                                "compression": float(latest.get('compression', 0.0)),
+                                "market_regime": int(latest.get('market_regime', 0)),
+                                "vwap_high": float(latest.get('vwap_high', 0.0)),
+                                "vwap_low": float(latest.get('vwap_low', 0.0)),
+                                "vfi_ema": float(latest.get('vfi_ema', 0.0)),
+                                "rvol": float(latest.get('rvol', 1.0)),
+                                "ltp": float(self.live_ltp) if self.live_ltp else float(latest.get('close', 0.0))
                             }
                         }
                         self.exec_pub.publish("EXEC.DECISION", decision_payload)
