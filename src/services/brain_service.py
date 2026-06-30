@@ -3,8 +3,11 @@ import threading
 import sys
 import os
 import uuid
+from pathlib import Path
 os.environ["POLARS_IGNORE_TIMEZONE_PARSE_ERROR"] = "1"
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 from datetime import datetime
 
 # Add root directory to python path if run as script
@@ -70,6 +73,7 @@ class BrainService:
         self.tracked_options = {}
         self.last_historic_fetch = 0
         self.last_option_refresh = 0
+        self.last_saved_indicator_minute = -1  # Tracks last minute we archived indicators
 
     def boot_sequence(self):
         logger.info("=== BOOT: Building Synthetic Volume Engine (this takes ~35 seconds) ===")
@@ -83,6 +87,44 @@ class BrainService:
         except Exception as e:
             logger.critical(f"BOOT ERROR: {e}")
             sys.exit(1)
+
+    def _save_indicator_snapshot(self, now: datetime):
+        """
+        Saves the last CLOSED candle (with all indicators: VWAP, EMA, VFI, ATR etc.)
+        to the indicator_stream Parquet Data Lake every minute.
+        This solves the critical gap where VFI/EMA/VWAP are computed but never persisted.
+        """
+        try:
+            if self.current_df is None or len(self.current_df) < 2:
+                return
+
+            # Take the second-to-last row — last CLOSED candle (not the live virtual one)
+            closed_candle = self.current_df.iloc[-2].to_dict()
+
+            # Add provenance metadata
+            closed_candle['saved_at'] = now.isoformat()
+            closed_candle['anchor_symbol'] = self.anchor_symbol
+            closed_candle['schema_version'] = 'indicator_stream_v1.0'
+
+            # Convert timestamp to string if it's a Timestamp object
+            if hasattr(closed_candle.get('timestamp'), 'isoformat'):
+                closed_candle['timestamp'] = str(closed_candle['timestamp'])
+
+            df = pd.DataFrame([closed_candle])
+
+            # Save to: data/institutional_memory/indicator_stream/YYYY/MM/DD/indicators_HHMM.parquet
+            date_str = now.strftime("%Y/%m/%d")
+            save_dir = Path("data/institutional_memory/indicator_stream") / date_str
+            save_dir.mkdir(parents=True, exist_ok=True)
+
+            file_name = f"indicators_{now.strftime('%H%M')}.parquet"
+            save_path = save_dir / file_name
+
+            table = pa.Table.from_pandas(df, preserve_index=False)
+            pq.write_table(table, save_path, compression="zstd")
+
+        except Exception as e:
+            logger.warning(f"[IndicatorStream] Could not save snapshot: {e}")
 
     def subscribe_options(self, tokens, exchange="NFO"):
         """Sends command to FeedService to subscribe to options"""
@@ -271,7 +313,15 @@ class BrainService:
                                 if self.live_low: price_df.at[idx, 'low'] = min(price_df.at[idx, 'low'], self.live_low)
                             
                             self.current_df = append_all_indicators(price_df)
-                            
+
+                            # ── INDICATOR STREAM ARCHIVAL (G1 Fix) ──────────────
+                            # Save last closed candle with VFI/EMA/VWAP to Parquet
+                            # once per minute at the minute boundary.
+                            if now.minute != self.last_saved_indicator_minute:
+                                self._save_indicator_snapshot(now)
+                                self.last_saved_indicator_minute = now.minute
+                            # ────────────────────────────────────────────────────
+
                             # Refresh Option Universe
                             if now_ts - self.last_option_refresh >= 60:
                                 index_name, exch_seg = self.fetcher.get_active_instrument()

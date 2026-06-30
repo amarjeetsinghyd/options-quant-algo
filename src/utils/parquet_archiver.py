@@ -63,8 +63,16 @@ def archive_ml_database(date_str=None):
             logger.info("Running VACUUM to shrink ML Database...")
             conn.execute("VACUUM")
         except Exception as ve:
-            logger.error(f"VACUUM failed: {ve}")
+            logger.error(f"VACUUM failed on ml_research.db: {ve}")
         conn.close()
+
+    # Also VACUUM strike_research.db (G3 fix — was previously missed)
+    try:
+        with sqlite3.connect(STRIKE_DB_PATH) as strike_conn:
+            logger.info("Running VACUUM to shrink Strike Research Database...")
+            strike_conn.execute("VACUUM")
+    except Exception as ve:
+        logger.error(f"VACUUM failed on strike_research.db: {ve}")
 
 def compress_institutional_memory():
     """
@@ -73,7 +81,7 @@ def compress_institutional_memory():
     """
     inst_mem_dir = Path(DATA_DIR) / "institutional_memory"
     
-    for base_folder in ["canonical_observations", "raw_ticks"]:
+    for base_folder in ["canonical_observations", "raw_ticks", "indicator_stream"]:
         base_path = inst_mem_dir / base_folder
         if not base_path.exists(): continue
             

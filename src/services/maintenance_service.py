@@ -1,7 +1,6 @@
 import sys
 import os
 import time
-import subprocess
 from datetime import datetime
 import threading
 
@@ -20,22 +19,31 @@ class MaintenanceService:
     def _run_eod_tasks(self):
         logger.info("=== STARTING 3:35 PM EOD MAINTENANCE ===")
         try:
-            # 1. Run Parquet Archiver
+            # 1. Run Parquet Archiver (direct import — no subprocess path issues)
             logger.info("Running Parquet Archiver...")
-            subprocess.run([sys.executable, "src/utils/parquet_archiver.py"], check=False)
-            
-            # 2. Run Nightly Validator
+            from src.utils.parquet_archiver import archive_ml_database, compress_institutional_memory
+            archive_ml_database()
+            compress_institutional_memory()
+
+            # 2. Run Nightly Validator (direct import — no subprocess path issues)
             logger.info("Running ML Data Validator...")
-            subprocess.run([sys.executable, "src/ml_engine/eod_validator.py"], check=False)
-            
-                    # 3. Cloud Backup (direct call — no subprocess overhead)
+            try:
+                from src.ml_engine.eod_validator import run_eod_validation
+                run_eod_validation()
+            except ImportError:
+                logger.warning("eod_validator not found or run_eod_validation() not exported — skipping.")
+            except Exception as ev:
+                logger.error(f"EOD Validator error: {ev}")
+
+            # 3. Cloud Backup (direct call — no subprocess overhead)
             logger.info("Running Cloud Backup...")
             from src.services.cloud_backup import run_backup
             run_backup()
-            
+
             logger.info("=== EOD MAINTENANCE COMPLETED ===")
         except Exception as e:
             logger.error(f"Error during EOD maintenance: {e}")
+
 
     def run(self):
         logger.info("Maintenance Service Started. Monitoring for 15:35 schedule...")
