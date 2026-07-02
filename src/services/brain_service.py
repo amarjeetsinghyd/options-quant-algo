@@ -86,14 +86,23 @@ class BrainService:
         try:
             from src.ml_engine.ml_db import init_ml_db
             init_ml_db(recreate=False)
-            
-            boot_df = self.fetcher.get_historical_candles_with_synthetic_volume(days_back=5)
-            if not boot_df.empty:
+
+            from src.services.gap_fill_service import load_cached_boot_dataframe
+            boot_df = load_cached_boot_dataframe()
+            if boot_df is not None and not boot_df.empty:
+                logger.info("=== BOOT: Loaded synthetic volume boot cache from GapFillService ===")
+            else:
+                logger.info("=== BOOT: No current cache found; fetching synthetic volume gap fill directly ===")
+                boot_df = self.fetcher.get_historical_candles_with_synthetic_volume(days_back=5)
+
+            if boot_df is not None and not boot_df.empty:
                 self.cached_volume_df = boot_df.set_index('timestamp')[['volume']].rename(columns={'volume': 'synth_vol'})
                 self.cached_price_df = boot_df.set_index('timestamp')[['open', 'high', 'low', 'close']]
                 with self._df_lock:
                     self.current_df = append_all_indicators(boot_df)
                 logger.info("=== BOOT COMPLETE: Synthetic Volume Engine Online ===")
+            else:
+                raise RuntimeError("Boot bootstrap data is unavailable after gap fill fallback.")
         except Exception as e:
             logger.critical(f"BOOT ERROR: {e}")
             sys.exit(1)

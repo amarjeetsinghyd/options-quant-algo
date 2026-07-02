@@ -11,7 +11,6 @@
 # This file is intentionally lean. Do not add ML or execution logic here.
 
 import os
-import sys
 import json
 import threading
 import pandas as pd
@@ -24,6 +23,8 @@ logger = get_logger("ui_node")
 
 app = Flask(__name__, template_folder='src/web/templates', static_folder='src/web/static')
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+app.config['TEMPLATES_AUTO_RELOAD'] = True
+app.jinja_env.auto_reload = True
 
 @app.after_request
 def add_header(response):
@@ -38,10 +39,13 @@ if os.path.exists("trade_history.json"):
     try:
         with open("trade_history.json", 'r') as f:
             history_data = json.load(f)
-    except: pass
+    except Exception:
+        pass
 
 # Auditor Fix: Module-level telemetry cache
 _telemetry_cache = {}
+
+state_lock = threading.Lock()
 
 # UI State Dictionary
 state = {
@@ -59,33 +63,34 @@ def on_exec_message(topic, payload):
     """Callback for messages coming from the Brain Service via ZeroMQ."""
     global state, _telemetry_cache
     
-    if topic == "EXEC.TELEMETRY":
-        _telemetry_cache.update(payload)
-        state["telemetry"] = _telemetry_cache
-        
-    elif topic == "EXEC.ACTIVE_TRADE":
-        state["active_trade"] = payload
-        
-    elif topic == "EXEC.SETUP":
-        # New setup pending
-        state["active_trade"] = payload  # UI treats pending setups similarly to active for display
-        
-    elif topic == "EXEC.SIGNAL_RESOLVED":
-        signal = payload.get("signal", {})
-        if signal.get('signal_category') == 'EXECUTED':
-            state["history"].insert(0, signal)
-            state["active_trade"] = None
-        elif signal.get('signal_category') == 'REJECTED':
-            state["active_trade"] = None
+    with state_lock:
+        if topic == "EXEC.TELEMETRY":
+            _telemetry_cache.update(payload)
+            state["telemetry"] = _telemetry_cache
             
-    elif topic == "EXEC.CHART_SYNC":
-        state["chart_data"] = payload
+        elif topic == "EXEC.ACTIVE_TRADE":
+            state["active_trade"] = payload
+            
+        elif topic == "EXEC.SETUP":
+            # New setup pending
+            state["active_trade"] = payload  # UI treats pending setups similarly to active for display
+            
+        elif topic == "EXEC.SIGNAL_RESOLVED":
+            signal = payload.get("signal", {})
+            if signal.get('signal_category') == 'EXECUTED':
+                state["history"].insert(0, signal)
+                state["active_trade"] = None
+            elif signal.get('signal_category') == 'REJECTED':
+                state["active_trade"] = None
+                
+        elif topic == "EXEC.CHART_SYNC":
+            state["chart_data"] = payload
 
-    elif topic == "EXEC.DECISION":
-        # Keep last 100 decisions in memory
-        state["decisions"].insert(0, payload)
-        if len(state["decisions"]) > 100:
-            state["decisions"] = state["decisions"][:100]
+        elif topic == "EXEC.DECISION":
+            # Keep last 100 decisions in memory
+            state["decisions"].insert(0, payload)
+            if len(state["decisions"]) > 100:
+                state["decisions"] = state["decisions"][:100]
 
 def start_zmq_listener():
     """Background thread that listens to Brain Service events."""
@@ -101,16 +106,34 @@ def index():
 def intelligence_lab():
     return render_template('intelligence_lab.html')
 
+def read_service_status():
+    status_path = os.path.join(os.path.dirname(__file__), 'data', 'service_status.json')
+    if os.path.exists(status_path):
+        try:
+            with open(status_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as exc:
+            logger.warning(f"Could not read service status file: {exc}")
+    return {}
+
 @app.route('/api/status')
 def get_status():
     # Serve from the module-level cache to ensure browser refresh doesn't blank
-    state["telemetry"] = _telemetry_cache
-    return jsonify(state)
+    with state_lock:
+        state["telemetry"] = _telemetry_cache
+        status_payload = read_service_status()
+        state["service_status"] = status_payload.get('services', {})
+        state["service_summary"] = {
+            'engine_pid': status_payload.get('engine_pid'),
+            'started_at': status_payload.get('started_at')
+        }
+        return jsonify(state)
 
 @app.route('/api/chart_data')
 def chart_data():
     try:
-        data = state.get("chart_data", [])
+        with state_lock:
+            data = list(state.get("chart_data", []))
         if not data:
             return jsonify([])
             
@@ -135,13 +158,17 @@ def chart_data():
         df = df.fillna(0)
         
         cols = ['time', 'open', 'high', 'low', 'close', 'value']
-        if 'vwap' in df.columns: cols.append('vwap')
-        if 'ema_9' in df.columns: cols.append('ema_9')
-        if 'vfi' in df.columns: cols.append('vfi')
-        if 'vfi_ema' in df.columns: cols.append('vfi_ema')
-        
+        if 'vwap' in df.columns:
+            cols.append('vwap')
+        if 'ema_9' in df.columns:
+            cols.append('ema_9')
+        if 'vfi' in df.columns:
+            cols.append('vfi')
+        if 'vfi_ema' in df.columns:
+            cols.append('vfi_ema')
+
         cols = [c for c in cols if c in df.columns]
-        
+
         json_data = df[cols].to_json(orient='records')
         return app.response_class(json_data, mimetype='application/json')
     except Exception as e:
@@ -152,11 +179,24 @@ def intel_health():
     """Reads the health_state.json written by health_service.py"""
     try:
         health_path = os.path.join(os.path.dirname(__file__), 'data', 'health_state.json')
+        latest = {}
         if os.path.exists(health_path):
-            with open(health_path, 'r') as f:
+            with open(health_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            return jsonify(data.get('latest', {}))
-        return jsonify({"error": "Health data not yet available"})
+            latest = data.get('latest', {})
+
+        status_payload = read_service_status()
+        if status_payload:
+            latest['service_status'] = status_payload.get('services', {})
+            latest['service_summary'] = {
+                'engine_pid': status_payload.get('engine_pid'),
+                'started_at': status_payload.get('started_at')
+            }
+
+        if not latest:
+            return jsonify({"error": "Health data not yet available"})
+
+        return jsonify(latest)
     except Exception as e:
         return jsonify({"error": str(e)})
 
@@ -164,15 +204,16 @@ def intel_health():
 def intel_decisions():
     """Returns decision statistics + recent decisions from in-memory buffer and parquet history"""
     try:
-        # In-memory recent decisions (last 100)
-        recent = state.get('decisions', [])
-        
+        with state_lock:
+            # In-memory recent decisions (last 100)
+            recent = list(state.get('decisions', []))
+
         # Also try to get today's totals from parquet
         total = 0
         accepted = 0
         rejected = 0
         reasons = {}
-        
+
         parquet_path = os.path.join(os.path.dirname(__file__), 'data', 'decision_history.parquet')
         if os.path.exists(parquet_path):
             try:
@@ -204,8 +245,9 @@ def intel_decisions():
 def intel_live_state():
     """Returns the current computed market indicators from the latest telemetry"""
     try:
-        telemetry = state.get('telemetry', {})
-        chart = state.get('chart_data', [])
+        with state_lock:
+            telemetry = dict(state.get('telemetry', {}))
+            chart = list(state.get('chart_data', []))
         
         # Get latest candle indicators if chart data available
         market_regime = None
@@ -234,7 +276,8 @@ def intel_live_state():
 def intel_order_flow():
     """Returns the active setup / trade order flow state from in-memory state"""
     try:
-        active = state.get('active_trade')
+        with state_lock:
+            active = state.get('active_trade')
         return jsonify({
             'active_trade': active,
             'has_active': active is not None
@@ -246,7 +289,8 @@ def intel_order_flow():
 def intel_trades():
     """Returns trade history"""
     try:
-        history = state.get('history', [])
+        with state_lock:
+            history = list(state.get('history', []))
         # Calculate summary stats
         wins = sum(1 for t in history if t.get('result') == 'WIN')
         losses = sum(1 for t in history if t.get('result') == 'LOSS')

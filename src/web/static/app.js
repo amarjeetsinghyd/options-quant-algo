@@ -11,6 +11,15 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     initTheme();
+    statusDot = document.getElementById('status-dot');
+    statusText = document.getElementById('status-text');
+    statusIndicator = document.querySelector('.status-indicator');
+    serviceStatusTag = document.getElementById('service-status-tag');
+    svcEnginePid = document.getElementById('svc-engine-pid');
+    svcRunningCount = document.getElementById('svc-running-count');
+    svcFailedCount = document.getElementById('svc-failed-count');
+    svcLastRefresh = document.getElementById('svc-last-refresh');
+
     fetchTelemetry();
     setInterval(fetchTelemetry, 3000);
 });
@@ -18,6 +27,48 @@ document.addEventListener('DOMContentLoaded', () => {
 let previousActiveTrade = null;
 let previousHistoryCount = 0;
 let currentLiveLtp = null;
+let statusDot = null;
+let statusText = null;
+let statusIndicator = null;
+let serviceStatusTag = null;
+let svcEnginePid = null;
+let svcRunningCount = null;
+let svcFailedCount = null;
+let svcLastRefresh = null;
+
+function isValidNumber(value) {
+    return typeof value === 'number' && !Number.isNaN(value);
+}
+
+function updateServiceSummary(data) {
+    const services = data.service_status || {};
+    const values = Object.values(services);
+    const total = values.length;
+    const running = values.filter(s => s.state === 'running').length;
+    const failed = values.filter(s => s.state === 'failed').length;
+    const starting = values.filter(s => s.state === 'pending' || s.state === 'restarting').length;
+    const statusLabel = failed > 0 ? 'DEGRADED' : (running === total && total > 0 ? 'ONLINE' : 'STARTING');
+    if (serviceStatusTag) {
+        serviceStatusTag.innerText = statusLabel;
+        serviceStatusTag.className = 'status-pill ' + (failed > 0 ? 'tag-danger' : (running === total && total > 0 ? 'tag-success' : 'tag-warning'));
+    }
+
+    if (statusIndicator) {
+        statusIndicator.style.display = 'flex';
+        if (statusDot) {
+            statusDot.className = 'dot ' + (failed > 0 ? 'dot-warning' : (running === total && total > 0 ? 'dot-online' : 'dot-warning'));
+        }
+        if (statusText) {
+            statusText.innerText = statusLabel;
+        }
+    }
+
+    const summary = data.service_summary || {};
+    if (svcEnginePid) svcEnginePid.innerText = summary.engine_pid || '--';
+    if (svcRunningCount) svcRunningCount.innerText = total > 0 ? `${running}/${total}` : '--';
+    if (svcFailedCount) svcFailedCount.innerText = failed.toString();
+    if (svcLastRefresh) svcLastRefresh.innerText = new Date().toLocaleTimeString();
+}
 
 // THEME MANAGEMENT
 function initTheme() {
@@ -129,12 +180,18 @@ async function fetchTelemetry() {
         const data = await response.json();
         updateUI(data);
     } catch (e) {
-        document.getElementById('status-dot').className = 'dot dot-offline';
-        document.getElementById('status-text').innerText = 'OFFLINE';
+        if (statusDot) statusDot.className = 'dot dot-offline';
+        if (statusText) statusText.innerText = 'OFFLINE';
+        if (statusIndicator) statusIndicator.style.display = 'flex';
+        if (serviceStatusTag) {
+            serviceStatusTag.innerText = 'OFFLINE';
+            serviceStatusTag.className = 'status-pill tag-danger';
+        }
     }
 }
 
 function updateUI(data) {
+    updateServiceSummary(data);
     const sysTop = document.getElementById('sys-mode-top');
     const sysBot = document.getElementById('sys-mode-bottom');
     const sysBadge = document.getElementById('system-mode-indicator');
@@ -196,26 +253,28 @@ function updateUI(data) {
     }
 
     if (data.telemetry) {
-        if (data.telemetry.symbol) {
-            document.getElementById('val-symbol').innerText = data.telemetry.symbol;
+        const valSymbol = document.getElementById('val-symbol');
+        if (data.telemetry?.symbol) {
+            valSymbol.innerText = data.telemetry.symbol;
             const legendElem = document.getElementById('legend-symbol-display');
             if (legendElem) legendElem.innerText = data.telemetry.symbol;
         } else {
-            document.getElementById('val-symbol').innerText = '--';
+            valSymbol.innerText = '--';
         }
-        let ltpElem = document.getElementById('val-ltp');
-        if (data.telemetry.ltp) {
+
+        const ltpElem = document.getElementById('val-ltp');
+        if (isValidNumber(data.telemetry?.ltp)) {
             currentLiveLtp = data.telemetry.ltp;
             ltpElem.innerText = currentLiveLtp.toFixed(2);
         } else {
             ltpElem.innerText = '--';
         }
-        
-        if (data.telemetry.ltp_time) {
+
+        if (data.telemetry?.ltp_time) {
             document.getElementById('ltp-time').innerText = `(${data.telemetry.ltp_time})`;
         }
-        
-        if (data.telemetry.ltp && data.telemetry.vwap) {
+
+        if (isValidNumber(data.telemetry?.ltp) && isValidNumber(data.telemetry?.vwap)) {
             if (data.telemetry.ltp > data.telemetry.vwap) {
                 ltpElem.style.color = 'var(--success)';
             } else if (data.telemetry.ltp < data.telemetry.vwap) {
@@ -224,13 +283,13 @@ function updateUI(data) {
                 ltpElem.style.color = 'var(--text-primary)';
             }
         }
-        
-        document.getElementById('val-vwap').innerText = data.telemetry.vwap ? data.telemetry.vwap.toFixed(2) : '--';
-        
-        let emaElem = document.getElementById('val-ema');
-        let vwapVal = data.telemetry.vwap || 0;
-        if (data.telemetry.ema) {
-            let emaVal = data.telemetry.ema;
+
+        document.getElementById('val-vwap').innerText = isValidNumber(data.telemetry?.vwap) ? data.telemetry.vwap.toFixed(2) : '--';
+
+        const emaElem = document.getElementById('val-ema');
+        const vwapVal = isValidNumber(data.telemetry?.vwap) ? data.telemetry.vwap : 0;
+        if (isValidNumber(data.telemetry?.ema)) {
+            const emaVal = data.telemetry.ema;
             emaElem.innerText = emaVal.toFixed(2);
             if (emaVal > vwapVal) emaElem.className = 'value text-green';
             else if (emaVal < vwapVal) emaElem.className = 'value text-red';
@@ -239,23 +298,26 @@ function updateUI(data) {
             emaElem.innerText = '--';
             emaElem.className = 'value';
         }
-        
-        const vfi = data.telemetry.vfi !== undefined ? data.telemetry.vfi.toFixed(2) : '--';
-        const vfiEma = data.telemetry.vfi_ema !== undefined ? data.telemetry.vfi_ema.toFixed(2) : '--';
+
+        const vfi = isValidNumber(data.telemetry?.vfi) ? data.telemetry.vfi.toFixed(2) : '--';
+        const vfiEma = isValidNumber(data.telemetry?.vfi_ema) ? data.telemetry.vfi_ema.toFixed(2) : '--';
         const vfiEl = document.getElementById('val-vfi');
         vfiEl.innerText = `${vfi} / ${vfiEma}`;
-        
-        if (data.telemetry.vfi > 0) {
-            vfiEl.style.color = 'var(--success)';
-        } else if (data.telemetry.vfi < 0) {
-            vfiEl.style.color = 'var(--danger)';
-        } else {
-            vfiEl.style.color = 'var(--text-primary)';
+
+        if (isValidNumber(data.telemetry?.vfi)) {
+            if (data.telemetry.vfi > 0) {
+                vfiEl.style.color = 'var(--success)';
+            } else if (data.telemetry.vfi < 0) {
+                vfiEl.style.color = 'var(--danger)';
+            } else {
+                vfiEl.style.color = 'var(--text-primary)';
+            }
         }
-        let vol = data.telemetry.volume;
-        document.getElementById('val-volume').innerText = vol ? (vol >= 1000000 ? (vol / 1000000).toFixed(2) + 'M' : (vol / 1000).toFixed(1) + 'K') : '--';
-        
-        if (data.telemetry.volume_time) {
+
+        const vol = data.telemetry?.volume;
+        document.getElementById('val-volume').innerText = isValidNumber(vol) ? (vol >= 1000000 ? (vol / 1000000).toFixed(2) + 'M' : (vol / 1000).toFixed(1) + 'K') : '--';
+
+        if (data.telemetry?.volume_time) {
             document.getElementById('volume-time').innerText = `(${data.telemetry.volume_time})`;
         }
         

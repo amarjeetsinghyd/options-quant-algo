@@ -6,4 +6,4 @@ pm2 start ecosystem.config.js
 pm2 save
 echo Quant Engine has been started in the background.
 echo You can now close this window safely.
-timeout /t 5 >nul
+exit

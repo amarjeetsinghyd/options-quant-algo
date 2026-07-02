@@ -184,8 +184,18 @@ class DataFetcher:
     def _call_api_with_retry(self, api_func, *args, max_retries=5, initial_delay=1.0, **kwargs):
         """
         Executes an Angel One API call with exponential backoff retry logic.
-        Handles rate limits ('exceeding access rate') dynamically.
+        Uses the shared rate limiter for getCandleData when available.
         """
+        if _RATE_LIMITER_AVAILABLE and api_func.__name__ == "getCandleData" and CANDLE_LIMITER is not None:
+            return _rl_call_with_retry(
+                api_func,
+                *args,
+                limiter=CANDLE_LIMITER,
+                max_retries=max_retries,
+                base_delay=initial_delay,
+                **kwargs
+            )
+
         delay = initial_delay
         for attempt in range(max_retries):
             try:
@@ -255,12 +265,13 @@ class DataFetcher:
                     
                     fetched_count += 1
                     
-                # Sleep 1000ms between calls (1 req/sec) to stay well under strict 3 req/sec rate limit
-                time.sleep(1.0)
+                # Enforce a small inter-request delay even when a shared limiter is available.
+                # This helps avoid API jitter and keeps us safely below 3 req/sec.
+                time.sleep(0.4)
                 
             except Exception as e:
                 logger.warning(f"  Warning: Could not fetch volume for {stock_name}: {e}")
-                time.sleep(1.0)
+                time.sleep(0.4)
                 continue
         
         if all_volumes is not None:

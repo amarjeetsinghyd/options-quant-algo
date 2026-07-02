@@ -148,6 +148,87 @@ body {
     box-shadow: 0 0 10px var(--success);
     animation: pulse 2s infinite;
 }
+.dot-warning {
+    background-color: var(--warning);
+    box-shadow: 0 0 10px rgba(245, 158, 11, 0.35);
+}
+
+.service-status-panel {
+    margin-bottom: 1.5rem;
+    padding: 1.5rem;
+}
+
+.service-status-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.status-title {
+    font-size: 1rem;
+    font-weight: 800;
+}
+
+.status-subtitle {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.status-pill {
+    padding: 0.45rem 1rem;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.status-pill.tag-success {
+    background: rgba(16, 185, 129, 0.15);
+    color: var(--success);
+    border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.status-pill.tag-warning {
+    background: rgba(245, 158, 11, 0.15);
+    color: var(--warning);
+    border: 1px solid rgba(245, 158, 11, 0.2);
+}
+
+.status-pill.tag-danger {
+    background: rgba(239, 68, 68, 0.12);
+    color: var(--danger);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.service-status-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 1rem;
+}
+
+.service-status-card {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 14px;
+    padding: 1rem;
+}
+
+.service-status-label {
+    display: block;
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    margin-bottom: 0.35rem;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+}
+
+.service-status-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
 
 .btn {
     display: flex;

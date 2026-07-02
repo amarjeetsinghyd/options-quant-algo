@@ -52,6 +52,34 @@
                 </div>
                 <ul id="error-list"></ul>
             </div>
+
+            <div class="service-status-panel glass-panel">
+                <div class="service-status-header">
+                    <div>
+                        <div class="status-title">Service Status</div>
+                        <div class="status-subtitle">Quant Engine and service health summary</div>
+                    </div>
+                    <div class="status-pill" id="service-status-tag">Loading...</div>
+                </div>
+                <div class="service-status-grid">
+                    <div class="service-status-card">
+                        <span class="service-status-label">Engine PID</span>
+                        <span class="service-status-value" id="svc-engine-pid">--</span>
+                    </div>
+                    <div class="service-status-card">
+                        <span class="service-status-label">Services Running</span>
+                        <span class="service-status-value" id="svc-running-count">--</span>
+                    </div>
+                    <div class="service-status-card">
+                        <span class="service-status-label">Services Failed</span>
+                        <span class="service-status-value" id="svc-failed-count">--</span>
+                    </div>
+                    <div class="service-status-card">
+                        <span class="service-status-label">Last Refresh</span>
+                        <span class="service-status-value" id="svc-last-refresh">--</span>
+                    </div>
+                </div>
+            </div>
             
             <div class="grid-telemetry">
                 <div class="card card-anchor glass-panel">

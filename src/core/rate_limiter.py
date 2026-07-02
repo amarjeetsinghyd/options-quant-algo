@@ -235,14 +235,26 @@ def call_with_retry(func, *args, limiter: TokenBucketLimiter = None,
     for attempt in range(max_retries + 1):
         try:
             if limiter:
-                limiter.acquire()
+                acquired = limiter.acquire()
+                if not acquired:
+                    limiter_name = getattr(limiter, 'name', 'unknown')
+                    raise RuntimeError(
+                        f"[call_with_retry] Could not acquire slot for {func.__name__} "
+                        f"within timeout (limiter: {limiter_name})"
+                    )
             result = func(*args, **kwargs)
             # AngelOne SDK returns dict with 'status': False on error
             if isinstance(result, dict) and result.get('status') is False:
                 msg = result.get('message', 'Unknown API error')
                 error_code = result.get('errorcode', '')
-                # 403-equivalent: rate limit exceeded
-                if 'rate' in msg.lower() or error_code in ('AG8001', 'AG8002', '403'):
+                normalized_msg = msg.lower()
+                rate_limit_error = (
+                    'rate' in normalized_msg
+                    or 'too many requests' in normalized_msg
+                    or 'exceeding access rate' in normalized_msg
+                    or error_code in ('AG8001', 'AG8002', 'AB1021', '403')
+                )
+                if rate_limit_error:
                     wait = base_delay * (2 ** attempt)
                     logger.warning(
                         f"[call_with_retry] Rate limit hit calling {func.__name__}, "

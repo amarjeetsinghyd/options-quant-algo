@@ -2,7 +2,7 @@ import zmq
 import json
 import threading
 import queue
-from typing import Callable, Any
+from typing import Callable
 from src.utils.logger import get_logger
 
 logger = get_logger("message_bus")

@@ -433,6 +433,36 @@
                 <div class="health-stat-val" id="hs-cpu">CPU --</div>
                 <div class="health-stat-sub" id="hs-ram">RAM -- | Disk --GB</div>
             </div>
+            <div class="health-stat">
+                <div class="health-stat-label">Quant Engine PID</div>
+                <div class="health-stat-val" id="hs-engine-pid">--</div>
+                <div class="health-stat-sub" id="hs-engine-started">Started --</div>
+            </div>
+        </div>
+
+        <div class="card service-status-panel" id="service-status-panel">
+            <div class="card-header">
+                <div class="card-title"><ion-icon name="pulse-outline"></ion-icon> Engine Service Status</div>
+                <span class="tag tag-live">Live summary · every 2s</span>
+            </div>
+            <div class="service-status-grid">
+                <div class="service-status-card">
+                    <span class="service-status-label">Service Health</span>
+                    <span class="service-status-value" id="svc-status-tag">Loading...</span>
+                </div>
+                <div class="service-status-card">
+                    <span class="service-status-label">Services Running</span>
+                    <span class="service-status-value" id="svc-running-count">--</span>
+                </div>
+                <div class="service-status-card">
+                    <span class="service-status-label">Services Failed</span>
+                    <span class="service-status-value" id="svc-failed-count">--</span>
+                </div>
+                <div class="service-status-card">
+                    <span class="service-status-label">Last Refresh</span>
+                    <span class="service-status-value" id="svc-last-refresh">--</span>
+                </div>
+            </div>
         </div>
 
         <!-- Process Detail Cards -->

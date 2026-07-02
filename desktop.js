@@ -1,11 +1,9 @@
 const { app, BrowserWindow, Tray, Menu } = require('electron');
-const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
 let mainWindow;
 let tray;
-let pythonProcess;
 
 // Prevent multiple instances
 const gotTheLock = app.requestSingleInstanceLock();
@@ -18,7 +16,7 @@ if (!gotTheLock) {
             mainWindow.show();
             mainWindow.focus();
             // Automatically refresh the page to fix white screens if the engine restarted
-            mainWindow.reload();
+            mainWindow.webContents.reloadIgnoringCache();
         }
     });
 
@@ -40,6 +38,15 @@ if (!gotTheLock) {
             icon: path.join(__dirname, 'icon.ico') // Optional icon
         });
 
+        const loadDashboard = () => {
+            const url = 'http://127.0.0.1:5000';
+            mainWindow.webContents.session.clearCache().then(() => {
+                mainWindow.loadURL(url, { extraHeaders: 'pragma: no-cache\ncache-control: no-cache' });
+            }).catch(() => {
+                mainWindow.loadURL(url, { extraHeaders: 'pragma: no-cache\ncache-control: no-cache' });
+            });
+        };
+
         // Give Python time to boot the Flask server before loading
         const maxRetries = 30;
         let retries = 0;
@@ -47,7 +54,7 @@ if (!gotTheLock) {
             const http = require('http');
             const req = http.get('http://127.0.0.1:5000', (res) => {
                 if (res.statusCode === 200) {
-                    mainWindow.loadURL('http://127.0.0.1:5000');
+                    loadDashboard();
                 } else {
                     retry();
                 }
@@ -64,7 +71,7 @@ if (!gotTheLock) {
             } else {
                 console.log("Failed to connect to Python server after 30 seconds.");
                 // Load anyway so dev tools can be opened to debug, or show an error
-                mainWindow.loadURL('http://127.0.0.1:5000');
+                loadDashboard();
             }
         };
 

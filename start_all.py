@@ -12,19 +12,24 @@ Launches all services in supervised processes:
 Includes basic watchdog/restart logic and graceful shutdown on SIGINT/SIGTERM.
 """
 
+import json
 import os
 import sys
 import signal
 import time
 import subprocess
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from datetime import datetime
 
+from src.config.engineering_config import DATA_DIR, LOGS_DIR
 from src.utils.logger import get_logger
 from src.utils.market_calendar import is_trading_day
 
 logger = get_logger("start_all")
+
+SERVICE_STATUS_FILE = os.path.join(os.path.dirname(__file__), "data", "service_status.json")
+PID_FILE = os.path.join(os.path.dirname(__file__), "data", "quant_engine.pid")
 
 # ── Service definitions ───────────────────────────────────────────────────
 SERVICES = [
@@ -51,6 +56,11 @@ SERVICES = [
     {
         "name": "maintenance_service",
         "command": [sys.executable, "src/services/maintenance_service.py"],
+        "restart_on_failure": True,
+    },
+    {
+        "name": "gap_fill_service",
+        "command": [sys.executable, "src/services/gap_fill_service.py"],
         "restart_on_failure": True,
     },
     {
@@ -92,6 +102,62 @@ class ProcessSupervisor:
         self.restart_counts: Dict[str, int] = {}
         self.restart_timestamps: Dict[str, List[float]] = {}
         self._shutdown = False
+        self.log_handles: Dict[str, Any] = {}
+        self.service_status: Dict[str, Dict[str, Any]] = {
+            svc["name"]: {
+                "name": svc["name"],
+                "command": svc["command"],
+                "state": "pending",
+                "pid": None,
+                "return_code": None,
+                "restarts": 0,
+                "last_update": None,
+            }
+            for svc in services
+        }
+
+        os.makedirs(DATA_DIR, exist_ok=True)
+        os.makedirs(LOGS_DIR, exist_ok=True)
+
+    def _write_pid_file(self):
+        try:
+            with open(PID_FILE, "w", encoding="utf-8") as f:
+                f.write(str(os.getpid()))
+        except Exception as exc:
+            logger.warning("Unable to write PID file: %s", exc)
+
+    def _remove_pid_file(self):
+        try:
+            if os.path.exists(PID_FILE):
+                os.remove(PID_FILE)
+        except Exception as exc:
+            logger.warning("Unable to remove PID file: %s", exc)
+
+    def _persist_status(self):
+        status_payload = {
+            "engine_pid": os.getpid(),
+            "started_at": datetime.now().isoformat(),
+            "services": self.service_status,
+            "last_update": datetime.now().isoformat(),
+        }
+        try:
+            with open(SERVICE_STATUS_FILE, "w", encoding="utf-8") as f:
+                json.dump(status_payload, f, indent=2)
+        except Exception as exc:
+            logger.warning("Unable to write service status file: %s", exc)
+
+    def _update_service_status(self, name: str, state: str, pid: Optional[int] = None, return_code: Optional[int] = None):
+        status = self.service_status.get(name)
+        if status is None:
+            return
+        status["state"] = state
+        if pid is not None:
+            status["pid"] = pid
+        if return_code is not None:
+            status["return_code"] = return_code
+        status["restarts"] = self.restart_counts.get(name, 0)
+        status["last_update"] = datetime.now().isoformat()
+        self._persist_status()
 
     def start_all(self):
         """Launch all services."""
@@ -103,16 +169,24 @@ class ProcessSupervisor:
         try:
             env = os.environ.copy()
             env["PYTHONPATH"] = os.path.dirname(os.path.abspath(__file__))
+
+            log_path = os.path.join(LOGS_DIR, f"{name}.log")
+            log_handle = open(log_path, "a", encoding="utf-8")
+            self.log_handles[name] = log_handle
+
             proc = subprocess.Popen(
                 command,
-                env=env
-                # Remove PIPE to prevent OS buffer deadlocks (processes freezing after 64KB output).
-                # The children will inherit stdout/stderr from start_all.py directly.
+                env=env,
+                stdout=log_handle,
+                stderr=subprocess.STDOUT,
+                cwd=os.path.dirname(os.path.abspath(__file__)),
             )
             self.processes[name] = proc
             self.restart_counts.setdefault(name, 0)
+            self._update_service_status(name, "running", pid=proc.pid)
             logger.info("Started %s (PID %d)", name, proc.pid)
         except Exception as exc:
+            self._update_service_status(name, "failed", return_code=-1)
             logger.error("Failed to start %s: %s", name, exc)
 
     def monitor(self):
@@ -128,12 +202,16 @@ class ProcessSupervisor:
                     continue
 
                 retcode = proc.poll()
-                if retcode is not None:
-                    logger.warning("%s exited with code %d", name, retcode)
-                    if svc.get("restart_on_failure", False):
-                        self.handle_restart(svc)
-                    else:
-                        del self.processes[name]
+                if retcode is None:
+                    self._update_service_status(name, "running", pid=proc.pid)
+                    continue
+
+                logger.warning("%s exited with code %d", name, retcode)
+                self._update_service_status(name, "stopped", pid=proc.pid, return_code=retcode)
+                if svc.get("restart_on_failure", False):
+                    self.handle_restart(svc)
+                else:
+                    del self.processes[name]
 
             # Autonomous Shutdown at Configured Time
             now = datetime.now()
@@ -159,10 +237,13 @@ class ProcessSupervisor:
                 "%s exceeded max restarts (%d) within %ds. Not restarting.",
                 name, MAX_RESTARTS, MAX_RESTART_WINDOW_SECONDS
             )
+            self._update_service_status(name, "failed")
             return
 
         self.restart_timestamps[name].append(now)
-        
+        self.restart_counts[name] = count + 1
+        self._update_service_status(name, "restarting")
+
         delay = RESTART_DELAY_SECONDS * (2 ** count)
         
         logger.info("Restarting %s in %ds (attempt %d/%d in window)...",
@@ -176,14 +257,27 @@ class ProcessSupervisor:
         logger.info("Shutting down all services...")
         for name, proc in list(self.processes.items()):
             try:
-                logger.info("Terminating %s (PID %d)", name, proc.pid)
-                proc.terminate()
-                proc.wait(timeout=10)
+                if proc.poll() is None:
+                    logger.info("Terminating %s (PID %d)", name, proc.pid)
+                    proc.terminate()
+                    proc.wait(timeout=10)
+                else:
+                    logger.info("%s already stopped (PID %d).", name, proc.pid)
             except subprocess.TimeoutExpired:
                 logger.warning("%s did not terminate; killing.", name)
                 proc.kill()
             except Exception as exc:
                 logger.error("Error stopping %s: %s", name, exc)
+            finally:
+                self._update_service_status(name, "stopped", pid=getattr(proc, 'pid', None), return_code=proc.returncode)
+
+        for handle in self.log_handles.values():
+            try:
+                handle.close()
+            except Exception:
+                pass
+        self.log_handles.clear()
+        self._remove_pid_file()
         logger.info("All services stopped.")
 
 
@@ -215,6 +309,7 @@ def main():
     signal.signal(signal.SIGTERM, handle_shutdown)
 
     supervisor = ProcessSupervisor(SERVICES)
+    supervisor._write_pid_file()
     supervisor.start_all()
 
     try:

@@ -38,6 +38,10 @@ async function fetchHealth() {
         document.getElementById('hs-cpu').textContent = `CPU ${sys.cpu_usage_percent || 0}%`;
         document.getElementById('hs-ram').textContent = `RAM ${sys.ram_usage_percent || 0}% | Disk ${sys.disk_free_gb || 0}GB`;
 
+        const summary = data.service_summary || {};
+        document.getElementById('hs-engine-pid').textContent = summary.engine_pid || '--';
+        document.getElementById('hs-engine-started').textContent = summary.started_at ? `Started ${new Date(summary.started_at).toLocaleString()}` : 'Started --';
+
         // Process Grid
         const grid = document.getElementById('proc-grid');
         grid.innerHTML = '';
@@ -65,6 +69,41 @@ async function fetchHealth() {
 
     } catch (err) {
         console.error('Fetch Health Error:', err);
+    }
+}
+
+async function fetchServiceSummary() {
+    try {
+        const res = await fetch('/api/status', { cache: 'no-store' });
+        if (!res.ok) throw new Error('API Error');
+        const data = await res.json();
+        updateServiceSummary(data.service_summary || {});
+    } catch (err) {
+        console.error('Fetch Service Summary Error:', err);
+    }
+}
+
+function updateServiceSummary(summary) {
+    const status = summary.status || 'Unknown';
+    const statusColor = status.toLowerCase() === 'healthy' ? 'var(--success)' :
+                        status.toLowerCase() === 'degraded' ? 'var(--warning)' :
+                        status.toLowerCase() === 'failed' ? 'var(--danger)' : 'var(--text)';
+
+    const statusTag = document.getElementById('svc-status-tag');
+    if (statusTag) {
+        statusTag.textContent = status;
+        statusTag.style.color = statusColor;
+    }
+
+    const running = document.getElementById('svc-running-count');
+    if (running) running.textContent = summary.running_services ?? '--';
+
+    const failed = document.getElementById('svc-failed-count');
+    if (failed) failed.textContent = summary.failed_services ?? '--';
+
+    const lastRefresh = document.getElementById('svc-last-refresh');
+    if (lastRefresh) {
+        lastRefresh.textContent = summary.last_refresh ? new Date(summary.last_refresh).toLocaleTimeString() : '--';
     }
 }
 
@@ -370,7 +409,8 @@ async function loadAll() {
         fetchLiveState(),
         fetchDecisions(),
         fetchOrderFlow(),
-        fetchTrades()
+        fetchTrades(),
+        fetchServiceSummary()
     ]);
     updateTime();
 }

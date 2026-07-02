@@ -19,6 +19,14 @@ class MaintenanceService:
     def _run_eod_tasks(self):
         logger.info("=== STARTING 3:35 PM EOD MAINTENANCE ===")
         try:
+            # 0. Run Gap Fill first so archive and validator operate on complete data
+            logger.info("Running EOD Gap Fill Service before archival...")
+            try:
+                from src.services.gap_fill_service import run_gap_fill
+                run_gap_fill(days_back=5)
+            except Exception as gap_exc:
+                logger.error(f"Gap Fill Service error: {gap_exc}")
+
             # 1. Run Parquet Archiver (direct import — no subprocess path issues)
             logger.info("Running Parquet Archiver...")
             from src.utils.parquet_archiver import archive_ml_database, compress_institutional_memory
