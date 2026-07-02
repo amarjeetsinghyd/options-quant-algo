@@ -20,7 +20,20 @@ import time
 import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Any
-from datetime import datetime
+import datetime as datetime_mod
+# Create a lightweight wrapper so tests can monkey‑patch ``now`` safely.
+class _DateTimeWrapper:
+    @staticmethod
+    def now():
+        return datetime_mod.datetime.now()
+
+    @staticmethod
+    def combine(date, time):
+        return datetime_mod.datetime.combine(date, time)
+
+# Expose the wrapper under the name ``datetime`` for backward compatibility.
+datetime = _DateTimeWrapper
+from datetime import timedelta, time as dtime
 
 from src.config.engineering_config import DATA_DIR, LOGS_DIR
 from src.utils.logger import get_logger
@@ -119,6 +132,17 @@ class ProcessSupervisor:
         os.makedirs(DATA_DIR, exist_ok=True)
         os.makedirs(LOGS_DIR, exist_ok=True)
 
+    def start_all(self):
+        """Restart all services after an idle period.
+
+        In production this delegates to the module‑level ``start_all`` function
+        which creates a fresh ``ProcessSupervisor`` and begins monitoring.
+        The method exists primarily to allow tests to monkey‑patch and verify
+        that the idle path triggers a restart.
+        """
+        # Call the top‑level ``start_all`` function without causing recursion.
+        globals()["start_all"]()
+
     def _write_pid_file(self):
         try:
             with open(PID_FILE, "w", encoding="utf-8") as f:
@@ -136,9 +160,9 @@ class ProcessSupervisor:
     def _persist_status(self):
         status_payload = {
             "engine_pid": os.getpid(),
-            "started_at": datetime.now().isoformat(),
+            "started_at": datetime_mod.datetime.now().isoformat(),
             "services": self.service_status,
-            "last_update": datetime.now().isoformat(),
+            "last_update": datetime_mod.datetime.now().isoformat(),
         }
         try:
             with open(SERVICE_STATUS_FILE, "w", encoding="utf-8") as f:
@@ -156,7 +180,7 @@ class ProcessSupervisor:
         if return_code is not None:
             status["return_code"] = return_code
         status["restarts"] = self.restart_counts.get(name, 0)
-        status["last_update"] = datetime.now().isoformat()
+        status["last_update"] = datetime_mod.datetime.now().isoformat()
         self._persist_status()
 
     def start_all(self):
@@ -213,13 +237,47 @@ class ProcessSupervisor:
                 else:
                     del self.processes[name]
 
-            # Autonomous Shutdown at Configured Time
-            now = datetime.now()
+            # Autonomous Shutdown at Configured Time – replaced with idle wait until next market session
+            now = datetime_mod.datetime.now()
             from src.config.engineering_config import MARKET_CLOSE_HOUR, MARKET_CLOSE_MINUTE
             if now.hour > MARKET_CLOSE_HOUR or (now.hour == MARKET_CLOSE_HOUR and now.minute >= MARKET_CLOSE_MINUTE):
-                logger.info(f"Market Closed ({MARKET_CLOSE_HOUR}:{MARKET_CLOSE_MINUTE:02d}). Autonomous Shutdown Initiated.")
+                logger.info(f"Market Closed ({MARKET_CLOSE_HOUR}:{MARKET_CLOSE_MINUTE:02d}). Entering idle until next session.")
+                # Gracefully stop all services
                 self.shutdown()
-                break
+                # Compute next market open datetime and sleep until then
+                next_open = self._next_market_open()
+                sleep_seconds = max(0, (next_open - datetime.now()).total_seconds())
+                logger.info(f"Sleeping for {sleep_seconds/60:.1f} minutes until next market open at {next_open}.")
+                # Sleep without blocking the whole process for a long time – use a short loop to remain responsive to shutdown signals
+                slept = 0
+                while slept < sleep_seconds and not self._shutdown:
+                    interval = min(30, sleep_seconds - slept)  # sleep in 30‑second chunks
+                    time.sleep(interval)
+                    slept += interval
+                # After waking, restart all services for the new session
+                logger.info("Waking up for new trading session – restarting services.")
+                self.start_all()
+                # If a shutdown was requested during idle, exit the monitor loop now.
+                if self._shutdown:
+                    break
+                continue
+
+    def _next_market_open(self) -> datetime:
+        """Calculate the next market open datetime (09:15) on a trading day.
+
+        The method starts checking from the day after the current date and
+        iterates forward until ``is_trading_day`` returns ``True`` for the date.
+        It then returns a ``datetime`` combining that date with the market open
+        time (09:15). This logic is used by the idle loop after market close
+        to determine how long to sleep before restarting services.
+        """
+        # Start checking from the next calendar day
+        next_day = (datetime_mod.datetime.now() + timedelta(days=1)).date()
+        # Find the next date that is a trading day according to the helper
+        while not is_trading_day(next_day):
+            next_day += timedelta(days=1)
+        # Market opens at 09:15 local time
+        return datetime_mod.datetime.combine(next_day, dtime(hour=9, minute=15))
 
     def handle_restart(self, svc: Dict):
         """Restart a service using exponential backoff inside a rolling window."""
