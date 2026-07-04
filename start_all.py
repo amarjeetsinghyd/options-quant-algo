@@ -42,6 +42,7 @@ from src.config.engineering_config import (
     ENABLE_SHADOW_SERVICE
 )
 from src.core.process_launcher import ProcessLauncher
+from src.core.shutdown_manager import ShutdownManager
 from src.utils.logger import get_logger
 from src.utils.market_calendar import is_trading_day
 
@@ -219,6 +220,7 @@ class LifecycleManager:
         self.current_state = "UNKNOWN"
         self.system_health = "STARTING"
         self.transition_history = deque(maxlen=500)
+        self.shutdown_manager = ShutdownManager()
         
         self.service_status: Dict[str, Dict[str, Any]] = {
             svc["name"]: {
@@ -429,6 +431,13 @@ class LifecycleManager:
     def monitor(self):
         """Periodic loop to verify running processes, transition aware, avoiding busy-polling."""
         while not self._shutdown:
+            # 0. Check for graceful shutdown request via ShutdownManager
+            if self.shutdown_manager.is_shutdown_requested():
+                logger.info("Graceful shutdown trigger detected via ShutdownManager.")
+                self.shutdown_manager.clear_shutdown_trigger()
+                self.shutdown()
+                break
+                
             time.sleep(SUPERVISOR_POLLING_INTERVAL_SECONDS)
             
             # 1. Check for scheduled lifecycle state transitions

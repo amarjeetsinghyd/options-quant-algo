@@ -57,3 +57,6 @@ scratch/
 walkthrough.md
 implementation_plan.md
 task.md
+
+# Non-persistent runtime state
+runtime/
