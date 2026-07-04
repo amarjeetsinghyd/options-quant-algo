@@ -119,20 +119,8 @@ SENSEX_CASH_TOKEN = "99919000"
 class DataFetcher:
     def __init__(self, smartApi):
         self.api = smartApi
-        self.token_df = self._load_tokens()
-
-    def _load_tokens(self):
-        os.makedirs("data", exist_ok=True)
-        if not os.path.exists(CACHE_FILE):
-            logger.info("Downloading token master list (this happens once a day)...")
-            data = requests.get(MASTER_URL).json()
-            with open(CACHE_FILE, 'w') as f:
-                json.dump(data, f)
-        
-        # Load from cache
-        with open(CACHE_FILE, 'r') as f:
-            data = json.load(f)
-        return pd.DataFrame(data)
+        from src.core.instrument_repository import InstrumentRepository
+        self.repo = InstrumentRepository()
 
     def get_active_instrument(self):
         """
@@ -148,22 +136,12 @@ class DataFetcher:
 
     def get_current_futures_token(self):
         name, exch_seg = self.get_active_instrument()
-        df = self.token_df
-        fut_df = df[(df['name'] == name) & (df['exch_seg'] == exch_seg) & (df['instrumenttype'] == 'FUTIDX')].copy()
-        
-        if fut_df.empty:
+        res = self.repo.get_futures_token("ANGEL", name, exch_seg)
+        if not res:
             logger.error(f"ERROR: Could not find Futures for {name} on {exch_seg}.")
             return None, None, None
-            
-        fut_df['expiry_dt'] = pd.to_datetime(fut_df['expiry'], format='%d%b%Y', errors='coerce')
-        now = datetime.now()
-        future_expiries = fut_df[fut_df['expiry_dt'] >= now]
-        
-        if future_expiries.empty:
-            return None, None, None
-            
-        nearest = future_expiries.sort_values('expiry_dt').iloc[0]
-        return nearest['token'], nearest['symbol'], exch_seg
+        token, symbol = res
+        return token, symbol, exch_seg
 
     def get_cash_index_token(self):
         """Returns the Cash Index token for the active instrument."""
@@ -353,18 +331,7 @@ class DataFetcher:
         
     def get_weekly_option_tokens(self):
         name, exch_seg = self.get_active_instrument()
-        df = self.token_df
-        opt_df = df[(df['name'] == name) & (df['exch_seg'] == exch_seg) & (df['instrumenttype'] == 'OPTIDX')].copy()
-        
-        if opt_df.empty:
+        rows = self.repo.get_weekly_option_tokens("ANGEL", name, exch_seg)
+        if not rows:
             return pd.DataFrame()
-            
-        opt_df['expiry_dt'] = pd.to_datetime(opt_df['expiry'], format='%d%b%Y', errors='coerce')
-        now = datetime.now()
-        future_expiries = opt_df[opt_df['expiry_dt'] >= now]
-        if future_expiries.empty:
-            return pd.DataFrame()
-            
-        nearest_expiry = future_expiries.sort_values('expiry_dt').iloc[0]['expiry_dt']
-        weekly_opts = future_expiries[future_expiries['expiry_dt'] == nearest_expiry]
-        return weekly_opts
+        return pd.DataFrame(rows)

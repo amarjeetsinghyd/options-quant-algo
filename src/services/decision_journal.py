@@ -92,6 +92,14 @@ class DecisionJournal:
             if "market_state" in message and isinstance(message["market_state"], dict):
                 message["market_state_json"] = json.dumps(message["market_state"])
                 del message["market_state"]
+                
+            if "strategy_parameters" in message:
+                message["strategy_parameters_json"] = json.dumps(message["strategy_parameters"])
+                del message["strategy_parameters"]
+                
+            if "rule_evaluations" in message:
+                message["rule_evaluations_json"] = json.dumps(message["rule_evaluations"])
+                del message["rule_evaluations"]
             
             wal_line = json.dumps(message) + '\n'
             with self.lock:

@@ -44,3 +44,16 @@ append_ml.py
 # OS generated files
 .DS_Store
 Thumbs.db
+
+# Data segments & archives
+*.parquet
+*.zst
+*.zip
+*.tar.gz
+
+# Agent workspaces & walkthroughs
+.agents/
+scratch/
+walkthrough.md
+implementation_plan.md
+task.md

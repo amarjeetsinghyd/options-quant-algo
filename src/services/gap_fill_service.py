@@ -11,7 +11,7 @@ import pandas as pd
 # Add root directory to python path if run as script
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from src.core.angel_connection import get_angel_connection
+from src.broker import get_broker_adapter
 from src.core.data_fetcher import DataFetcher
 from src.config.engineering_config import DATA_DIR
 from src.utils.logger import get_logger
@@ -55,10 +55,12 @@ class GapFillService:
         self._last_run_date = None
 
         try:
-            self.api, _ = get_angel_connection()
+            # Initialise the broker abstraction and obtain the underlying API.
+            broker = get_broker_adapter()
+            self.api = getattr(broker, "api", None)
             self.fetcher = DataFetcher(self.api)
         except Exception as e:
-            logger.critical(f"[GapFillService] Failed to initialize Angel One connection: {e}")
+            logger.critical(f"[GapFillService] Failed to initialize broker adapter: {e}")
             raise
 
         self.cache_dir = CACHE_DIR

@@ -92,6 +92,15 @@ class ResearchCollector:
             self._buffer.clear()
             
         df = pd.DataFrame(records)
+        from src.utils.provenance import get_provenance_metadata
+        prov = get_provenance_metadata()
+        df["git_commit"] = prov["git_commit"]
+        df["git_branch"] = prov["git_branch"]
+        df["git_dirty"] = prov["git_dirty"]
+        df["strategy_hash"] = prov["strategy_hash"]
+        df["schema_version"] = prov["schema_version"]
+        df["dataset_schema_version"] = prov["dataset_schema_version"]
+        
         date_str = datetime.now().strftime("%Y-%m-%d")
         parquet_path = RESEARCH_DIR / f"{date_str}.parquet"
         

@@ -15,9 +15,9 @@ NSE_HOLIDAYS = [
     date(2026, 12, 25), # Christmas
 ]
 
-def is_trading_day(dt: datetime = None) -> bool:
+def is_trading_day(dt = None) -> bool:
     """
-    Checks if a given datetime is a trading day on the NSE.
+    Checks if a given datetime or date is a trading day on the NSE.
     Returns False if it is a weekend or a known public holiday.
     """
     if dt is None:
@@ -28,7 +28,9 @@ def is_trading_day(dt: datetime = None) -> bool:
         return False
         
     # Check if public holiday
-    if dt.date() in NSE_HOLIDAYS:
+    check_date = dt.date() if hasattr(dt, 'date') else dt
+    if check_date in NSE_HOLIDAYS:
         return False
         
     return True
+

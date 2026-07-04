@@ -7,6 +7,8 @@ import pandas as pd
 from src.utils.charting import generate_trade_chart
 
 from src.utils.logger import get_logger
+from src.core.decision_lifecycle import DecisionLifecycle
+
 logger = get_logger("paper_trader")
 
 
@@ -107,6 +109,12 @@ class PaperTrader:
         # Check 3-Minute Expiration
         if now > setup["expiry_time"]:
             logger.info(f"[{now.time()}] SETUP ABORTED: 3 minutes passed without breakout.")
+            setup["rejection_reason"] = "TIMEOUT"
+            setup["rejection_stage"] = "SNIPER"
+            setup["signal_category"] = "REJECTED"
+            if "decision_payload" in setup:
+                setup["decision_payload"]["lifecycle_stage"] = DecisionLifecycle.RESOLVED.value
+                setup["decision_payload"]["status"] = "REJECTED_TIMEOUT"
             self.pending_setup = None
             return
             
@@ -124,6 +132,12 @@ class PaperTrader:
                 self._execute_trade(setup, current_nifty_df)
             else:
                 logger.info(f"!!! FAKE BREAKOUT DETECTED !!! Live price {live_ltp} broke Master Setup, but Candidate Delta is NEGATIVE or FLAT ({delta}). Trade Aborted.")
+                setup["rejection_reason"] = "NEGATIVE_DELTA"
+                setup["rejection_stage"] = "SNIPER"
+                setup["signal_category"] = "REJECTED"
+                if "decision_payload" in setup:
+                    setup["decision_payload"]["lifecycle_stage"] = DecisionLifecycle.RESOLVED.value
+                    setup["decision_payload"]["status"] = "REJECTED_NEGATIVE_DELTA"
                 self.pending_setup = None
 
     def update_option_cache(self, fetched_data):
@@ -259,8 +273,11 @@ class PaperTrader:
             "status": "OPEN",
             "slippage": depth_data,
             "start_time": time.time(),
-            "decision_uuid": setup.get("decision_uuid")
+            "decision_uuid": setup.get("decision_uuid"),
+            "decision_payload": setup.get("decision_payload")
         }
+        if self.current_trade["decision_payload"]:
+            self.current_trade["decision_payload"]["lifecycle_stage"] = DecisionLifecycle.EXECUTED.value
         
         self.trades_today += 1
         self.pending_setup = None
@@ -375,6 +392,13 @@ class PaperTrader:
         except:
             pass
             
+        from src.utils.provenance import get_provenance_metadata
+        prov = get_provenance_metadata()
+        
+        decision_payload = t.get("decision_payload")
+        if decision_payload:
+            decision_payload["lifecycle_stage"] = DecisionLifecycle.EXITED.value
+            
         self.history_list.append({
             "id": row_id,
             "date": datetime.now().strftime('%d %b %H:%M:%S'),
@@ -391,7 +415,17 @@ class PaperTrader:
             "reason": reason,
             "result": result,
             "slippage": t.get("slippage", {}),
-            "decision_uuid": t.get("decision_uuid")
+            "decision_uuid": t.get("decision_uuid"),
+            "git_commit": prov["git_commit"],
+            "git_branch": prov["git_branch"],
+            "git_dirty": prov["git_dirty"],
+            "strategy_hash": prov["strategy_hash"],
+            "schema_version": prov["schema_version"],
+            "migration_version": prov["migration_version"],
+            "compatible_reader_version": prov["compatible_reader_version"],
+            "feature_schema_version": prov["feature_schema_version"],
+            "dataset_schema_version": prov["dataset_schema_version"],
+            "decision_payload": decision_payload
         })
         
         # Save JSON file (Atomic write)

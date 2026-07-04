@@ -2,13 +2,12 @@ import time
 import threading
 import sys
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Add root directory to python path if run as script
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from src.core.angel_connection import get_angel_connection, get_websocket_connection
-from src.core.data_fetcher import DataFetcher
+from src.broker import get_broker_adapter
 from src.core.message_bus import MessageBusPublisher, MessageBusSubscriber, FEED_PORT, CMD_PORT
 from src.core.market_calendar import MarketCalendar
 from src.core.symbol_registry import SymbolRegistry
@@ -22,13 +21,16 @@ class FeedService:
         # Load the registry once (Singleton) — O(1) token→symbol lookup for all ticks
         self.registry = SymbolRegistry()
         
+        # Obtain broker adapter and session information via the abstraction layer
         try:
-            self.api, session_data = get_angel_connection()
+            broker = get_broker_adapter()
+            session_data = broker.session_provider.get_session()
         except Exception as e:
-            logger.critical(f"[FeedService] Failed to connect to Angel: {e}")
+            logger.critical(f"[FeedService] Failed to obtain broker session: {e}")
             sys.exit(1)
-            
-        self.fetcher = DataFetcher(self.api)
+
+        # Use the market data provider to get a DataFetcher bound to the broker API
+        self.fetcher = broker.market_data_provider.get_data_fetcher()
         self.anchor_token, self.anchor_symbol, self.anchor_exch = self.fetcher.get_cash_index_token()
         
         self.eq_exch_type = 1 if self.anchor_exch == "NSE" else 3
@@ -58,8 +60,10 @@ class FeedService:
         jwt_token = session_data.get("jwtToken")
         client_id = os.getenv("ANGEL_CLIENT_ID")
         api_key = os.getenv("ANGEL_API_KEY")
-        
-        self.ws = get_websocket_connection(jwt_token, api_key, client_id, feed_token)
+
+        self.ws = broker.market_data_provider.get_websocket_connection(
+            jwt_token, api_key, client_id, feed_token
+        )
         self.ws.on_open = self.on_open
         self.ws.on_data = self.on_data
         self.ws.on_error = self.on_error
@@ -125,8 +129,10 @@ class FeedService:
                 if sleep_sec > 10:
                     logger.info(f"[FeedService] Off-market ({session_type}). Sleeping for {int(sleep_sec)}s until {next_open}.")
                     time.sleep(sleep_sec - 5)  # Wake up 5 seconds early
-                    logger.warning("[FeedService] Waking up! Exiting to force fresh AngelOne token generation via Process Supervisor.")
-                    sys.exit(0)
+                    # NOTE: The exit code 10 is interpreted by the new LifecycleManager as a **daily token refresh** request.
+                    # The service itself does not perform any restart logic – it simply terminates with a distinct code.
+                    logger.warning("[FeedService] Waking up! Exiting to force fresh AngelOne token generation via LifecycleManager.")
+                    sys.exit(10)
             
             try:
                 logger.info(f"[FeedService] Connecting WS (Attempt {self.reconnect_attempts})...")

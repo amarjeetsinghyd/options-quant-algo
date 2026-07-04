@@ -48,6 +48,14 @@ class MaintenanceService:
             from src.services.cloud_backup import run_backup
             run_backup()
 
+            # 4. Instrument Registry Synchronization
+            logger.info("Running EOD Instrument Registry Sync...")
+            try:
+                from src.services.instrument_sync_service import run_sync
+                run_sync()
+            except Exception as sync_exc:
+                logger.error(f"EOD Instrument Sync error: {sync_exc}")
+
             logger.info("=== EOD MAINTENANCE COMPLETED ===")
         except Exception as e:
             logger.error(f"Error during EOD maintenance: {e}")

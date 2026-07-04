@@ -13,7 +13,7 @@ from datetime import datetime
 # Add root directory to python path if run as script
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from src.core.angel_connection import get_angel_connection
+from src.broker import get_broker_adapter
 from src.core.data_fetcher import DataFetcher
 from src.strategy.indicators import append_all_indicators
 from src.strategy.signal_generator import SignalGenerator
@@ -23,17 +23,23 @@ from src.utils.logger import get_logger
 from src.ml_engine.gamma_event_collector import GammaEventCollector
 from src.research.strike_intelligence import StrikeIntelligenceModule
 from src.config.engineering_config import STRATEGY_VERSION
+from src.core.decision_lifecycle import DecisionLifecycle
 
 logger = get_logger("brain_service")
 
 class BrainService:
     def __init__(self):
+        # Initialise broker abstraction
         try:
-            self.api, _ = get_angel_connection()
+            self.broker = get_broker_adapter()
         except Exception as e:
-            logger.critical(f"[BrainService] Failed to connect: {e}")
+            logger.critical(f"[BrainService] Failed to initialise broker: {e}")
             sys.exit(1)
-            
+
+        # Legacy services still expect the raw Angel API client; retrieve it from the adapter.
+        # The AngelOneAdapter exposes the client via the ``api`` property.
+        self.api = getattr(self.broker, "api", None)
+        # DataFetcher expects the Angel API client; for the default Angel broker this will be present.
         self.fetcher = DataFetcher(self.api)
         self.signal_gen = SignalGenerator()
         self.trader = PaperTrader(self.api, self.fetcher, [])
@@ -123,7 +129,18 @@ class BrainService:
             # Add provenance metadata
             closed_candle['saved_at'] = now.isoformat()
             closed_candle['anchor_symbol'] = self.anchor_symbol
-            closed_candle['schema_version'] = 'indicator_stream_v1.0'
+            
+            from src.utils.provenance import get_provenance_metadata
+            import json
+            prov = get_provenance_metadata()
+            closed_candle['schema_version'] = prov['schema_version']
+            closed_candle['git_commit'] = prov['git_commit']
+            closed_candle['git_branch'] = prov['git_branch']
+            closed_candle['git_dirty'] = prov['git_dirty']
+            closed_candle['strategy_hash'] = prov['strategy_hash']
+            closed_candle['feature_schema_version'] = prov['feature_schema_version']
+            closed_candle['dataset_schema_version'] = prov['dataset_schema_version']
+            closed_candle['feature_lineage_json'] = json.dumps(prov['feature_lineage'])
 
             # Convert timestamp to string if it's a Timestamp object
             if hasattr(closed_candle.get('timestamp'), 'isoformat'):
@@ -439,18 +456,27 @@ class BrainService:
                                 "machine_state": {}
                             }
                         else:
-                            signal, decision_state = self.signal_gen.check_signal(self.current_df)
-                            if not signal: 
+                            # 3-Tier Trace Levels evaluation:
+                            # Level 0 (generate_trace=False) for fast evaluations.
+                            # Level 1 (generate_trace=True) only if a candidate triggers.
+                            signal, decision_state = self.signal_gen.check_signal(self.current_df, generate_trace=False)
+                            if signal:
+                                signal, decision_state = self.signal_gen.check_signal(self.current_df, generate_trace=True)
+                            else:
                                 strat1_reason = decision_state.get("human_reason", "Strategy 1 failed")
                                 strat1_machine = decision_state.get("machine_state", {})
                                 
-                                signal, decision_state = self.signal_gen.check_rejection_signal(self.current_df)
-                                if not signal:
+                                signal, decision_state = self.signal_gen.check_rejection_signal(self.current_df, generate_trace=False)
+                                if signal:
+                                    signal, decision_state = self.signal_gen.check_rejection_signal(self.current_df, generate_trace=True)
+                                else:
                                     strat2_reason = decision_state.get("human_reason", "Strategy 2 failed")
                                     strat2_machine = decision_state.get("machine_state", {})
                                     
-                                    signal, decision_state = self.signal_gen.check_vwap_band_breakout_signal(self.current_df)
-                                    if not signal:
+                                    signal, decision_state = self.signal_gen.check_vwap_band_breakout_signal(self.current_df, generate_trace=False)
+                                    if signal:
+                                        signal, decision_state = self.signal_gen.check_vwap_band_breakout_signal(self.current_df, generate_trace=True)
+                                    else:
                                         strat3_reason = decision_state.get("human_reason", "Strategy 3 failed")
                                         decision_state["human_reason"] = f"S1: {strat1_reason} | S2: {strat2_reason} | S3: {strat3_reason}"
                                         decision_state["machine_state"]["strategy_1_state"] = strat1_machine
@@ -467,45 +493,98 @@ class BrainService:
                         if signal:
                             if self.trader.current_trade is not None:
                                 decision_status = "IGNORED_OPEN_TRADE"
+                                lifecycle_stage = DecisionLifecycle.FILTERED.value
                             elif self.trader.pending_setup is not None:
                                 decision_status = "IGNORED_SNIPER_MODE"
+                                lifecycle_stage = DecisionLifecycle.FILTERED.value
                             else:
                                 decision_status = "ACCEPTED"
+                                lifecycle_stage = DecisionLifecycle.CANDIDATE.value
                         else:
                             decision_status = "REJECTED"
+                            lifecycle_stage = DecisionLifecycle.OBSERVED.value
                         
-                        decision_payload = {
-                            "decision_uuid": decision_uuid,
-                            "observation_uuid": observation_uuid,
-                            "timestamp": datetime.now().isoformat(),
-                            "market_session_id": datetime.now().strftime("%Y-%m-%d"),
-                            "decision_action": "BUY" if signal and signal.get("type")=="CALL" else "SELL" if signal else "NONE",
-                            "status": decision_status,
-                            "trade_mode": "Paper Trade",
-                            "human_reason": decision_state.get("human_reason", ""),
-                            "machine_state": decision_state.get("machine_state", {}),
-                            "strategy_version": STRATEGY_VERSION,
-                            "market_state": {
-                                "vfi": float(latest.get('vfi', 0)),
-                                "vwap": float(latest.get('vwap', 0)),
-                                "ema_9": float(latest.get('ema_9', 0)),
-                                "atr": float(latest.get('atr', 0.0)),
-                                "atr_expansion": float(latest.get('atr_expansion', 1.0)),
-                                "compression": float(latest.get('compression', 0.0)),
-                                "market_regime": int(latest.get('market_regime', 0)),
-                                "vwap_high": float(latest.get('vwap_high', 0.0)),
-                                "vwap_low": float(latest.get('vwap_low', 0.0)),
-                                "vfi_ema": float(latest.get('vfi_ema', 0.0)),
-                                "rvol": float(latest.get('rvol', 1.0)),
-                                "ltp": float(self.live_ltp) if self.live_ltp else float(latest.get('close', 0.0))
+                        # Build conditional trace payload (Level 0 vs Level 1)
+                        if lifecycle_stage == DecisionLifecycle.OBSERVED.value:
+                            # Level 0: Minimal observation row
+                            decision_payload = {
+                                "decision_uuid": decision_uuid,
+                                "observation_uuid": observation_uuid,
+                                "timestamp": datetime.now().isoformat(),
+                                "market_session_id": datetime.now().strftime("%Y-%m-%d"),
+                                "decision_action": "NONE",
+                                "status": decision_status,
+                                "lifecycle_stage": lifecycle_stage,
+                                "decision_contract_version": "1.0.0",
+                                "strategy_version": STRATEGY_VERSION,
+                                "market_state": {
+                                    "vfi": float(latest.get('vfi', 0)),
+                                    "vwap": float(latest.get('vwap', 0)),
+                                    "ema_9": float(latest.get('ema_9', 0)),
+                                    "atr": float(latest.get('atr', 0.0)),
+                                    "atr_expansion": float(latest.get('atr_expansion', 1.0)),
+                                    "compression": float(latest.get('compression', 0.0)),
+                                    "market_regime": int(latest.get('market_regime', 0)),
+                                    "vwap_high": float(latest.get('vwap_high', 0.0)),
+                                    "vwap_low": float(latest.get('vwap_low', 0.0)),
+                                    "vfi_ema": float(latest.get('vfi_ema', 0.0)),
+                                    "rvol": float(latest.get('rvol', 1.0)),
+                                    "ltp": float(self.live_ltp) if self.live_ltp else float(latest.get('close', 0.0))
+                                }
                             }
-                        }
+                        else:
+                            # Level 1: Full Candidate / Filtered row
+                            from src.utils.provenance import get_provenance_metadata
+                            from src.strategy.registry import STRATEGY_CONSTANTS
+                            prov = get_provenance_metadata()
+                            
+                            decision_payload = {
+                                "decision_uuid": decision_uuid,
+                                "observation_uuid": observation_uuid,
+                                "timestamp": datetime.now().isoformat(),
+                                "market_session_id": datetime.now().strftime("%Y-%m-%d"),
+                                "decision_action": "BUY" if signal and signal.get("type") == "CALL" else "SELL" if signal else "NONE",
+                                "status": decision_status,
+                                "lifecycle_stage": lifecycle_stage,
+                                "decision_contract_version": "1.0.0",
+                                "trade_mode": "Paper Trade",
+                                "human_reason": decision_state.get("human_reason", ""),
+                                "machine_state": decision_state.get("machine_state", {}),
+                                "strategy_version": STRATEGY_VERSION,
+                                "git_commit": prov["git_commit"],
+                                "git_branch": prov["git_branch"],
+                                "git_dirty": prov["git_dirty"],
+                                "strategy_hash": prov["strategy_hash"],
+                                "schema_version": prov["schema_version"],
+                                "migration_version": prov["migration_version"],
+                                "compatible_reader_version": prov["compatible_reader_version"],
+                                "feature_schema_version": prov["feature_schema_version"],
+                                "dataset_schema_version": prov["dataset_schema_version"],
+                                "strategy_parameters": STRATEGY_CONSTANTS,
+                                "rule_evaluations": decision_state.get("rule_evaluations", []),
+                                "market_state": {
+                                    "vfi": float(latest.get('vfi', 0)),
+                                    "vwap": float(latest.get('vwap', 0)),
+                                    "ema_9": float(latest.get('ema_9', 0)),
+                                    "atr": float(latest.get('atr', 0.0)),
+                                    "atr_expansion": float(latest.get('atr_expansion', 1.0)),
+                                    "compression": float(latest.get('compression', 0.0)),
+                                    "market_regime": int(latest.get('market_regime', 0)),
+                                    "vwap_high": float(latest.get('vwap_high', 0.0)),
+                                    "vwap_low": float(latest.get('vwap_low', 0.0)),
+                                    "vfi_ema": float(latest.get('vfi_ema', 0.0)),
+                                    "rvol": float(latest.get('rvol', 1.0)),
+                                    "ltp": float(self.live_ltp) if self.live_ltp else float(latest.get('close', 0.0))
+                                }
+                            }
                         self.exec_pub.publish("EXEC.DECISION", decision_payload)
                             
                         # Only register setup if we accepted it (flat state)
                         if signal and decision_status == "ACCEPTED":
                             signal["signal_id"] = str(uuid.uuid4())
                             signal["decision_uuid"] = decision_uuid
+                            # Nest the full decision contract inside the signal so PaperTrader inherits it
+                            signal["decision_payload"] = decision_payload
                             self.trader.register_setup(signal)
                             # Publish setup to exec port for UI
                             self.exec_pub.publish("EXEC.SETUP", signal)

@@ -54,6 +54,7 @@ ENABLE_DUCKDB = False           # duckdb removed from deps
 MAX_RAM_MB = 400
 LOG_RETENTION_DAYS = 7
 PARQUET_WRITE_INTERVAL_SECONDS = 60
+SYMBOL_REGISTRY_CACHE_SIZE = 20000
 
 # Parquet storage path
 PARQUET_DIR = os.path.join(DATA_DIR, "research_journal")
@@ -64,3 +65,13 @@ ENABLE_LIVE_BROKERAGE_EXECUTION = False
 ENABLE_INSTITUTIONAL_REPORTS = False
 ENABLE_MULTI_INSTRUMENT = False
 ENABLE_AUTO_STRATEGY_DISCOVERY = False
+
+# Broker selection flag – determines which broker adapter the system uses.
+# Default is "ANGEL" to retain existing behaviour.
+BROKER = os.getenv("BROKER", "ANGEL")
+
+# Supervisor Timing Configurations
+SUPERVISOR_POLLING_INTERVAL_SECONDS = int(os.getenv("SUPERVISOR_POLLING_INTERVAL_SECONDS", "2"))
+SUPERVISOR_RESTART_DELAY_SECONDS = int(os.getenv("SUPERVISOR_RESTART_DELAY_SECONDS", "5"))
+SUPERVISOR_MAX_RESTARTS = int(os.getenv("SUPERVISOR_MAX_RESTARTS", "3"))
+SUPERVISOR_MAX_RESTART_WINDOW_SECONDS = int(os.getenv("SUPERVISOR_MAX_RESTART_WINDOW_SECONDS", "300"))
