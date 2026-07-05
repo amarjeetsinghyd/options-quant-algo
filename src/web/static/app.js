@@ -365,51 +365,77 @@ async function fetchAuditStatus() {
         
         const latest = data.latest || {};
         const manifest = data.manifest || [];
+        const isDay1 = manifest.length === 0;
         
         // Populate scores & statuses
-        const score = latest.confidence_score !== undefined ? latest.confidence_score : 100.0;
-        document.getElementById('audit-score-badge').innerText = `${score.toFixed(2)}%`;
-        
-        const resGrade = latest.research_certification || 'PASS';
-        const resBadge = document.getElementById('audit-status-badge');
-        resBadge.innerText = resGrade;
-        resBadge.className = 'chk-badge ' + (resGrade === 'PASS' ? 'badge-success' : (resGrade === 'FAILED' ? 'badge-danger' : 'badge-warning'));
-        
-        document.getElementById('audit-cert-res').innerText = resGrade;
-        document.getElementById('audit-cert-res').className = resGrade === 'PASS' ? 'text-success' : 'text-error';
-        
-        const certs = latest.dataset_certification || {};
-        document.getElementById('audit-cert-ticks').innerText = certs.raw_ticks || 'PASS';
-        document.getElementById('audit-cert-ticks').className = certs.raw_ticks === 'PASS' ? 'text-success' : 'text-error';
-        
-        document.getElementById('audit-cert-indicators').innerText = certs.indicators || 'PASS';
-        document.getElementById('audit-cert-indicators').className = certs.indicators === 'PASS' ? 'text-success' : 'text-error';
-        
-        document.getElementById('audit-cert-decisions').innerText = certs.decisions || 'PASS';
-        document.getElementById('audit-cert-decisions').className = certs.decisions === 'PASS' ? 'text-success' : 'text-error';
-        
-        document.getElementById('audit-cert-trades').innerText = certs.trades || 'PASS';
-        document.getElementById('audit-cert-trades').className = certs.trades === 'PASS' ? 'text-success' : 'text-error';
-        
-        document.getElementById('audit-meta-conf').innerText = latest.audit_config_hash || '--';
+        if (isDay1) {
+            document.getElementById('audit-score-badge').innerText = `Day 1`;
+            const resBadge = document.getElementById('audit-status-badge');
+            resBadge.innerText = 'BASELINE';
+            resBadge.className = 'chk-badge badge-success';
+            
+            document.getElementById('audit-cert-res').innerText = 'ACTIVE';
+            document.getElementById('audit-cert-res').className = 'text-success';
+            
+            document.getElementById('audit-cert-ticks').innerText = '--';
+            document.getElementById('audit-cert-ticks').className = 'text-secondary';
+            
+            document.getElementById('audit-cert-indicators').innerText = '--';
+            document.getElementById('audit-cert-indicators').className = 'text-secondary';
+            
+            document.getElementById('audit-cert-decisions').innerText = '--';
+            document.getElementById('audit-cert-decisions').className = 'text-secondary';
+            
+            document.getElementById('audit-cert-trades').innerText = '--';
+            document.getElementById('audit-cert-trades').className = 'text-secondary';
+            
+            document.getElementById('audit-meta-conf').innerText = '--';
+        } else {
+            const score = latest.confidence_score !== undefined ? latest.confidence_score : 100.0;
+            document.getElementById('audit-score-badge').innerText = `${score.toFixed(2)}%`;
+            
+            const resGrade = latest.research_certification || 'PASS';
+            const resBadge = document.getElementById('audit-status-badge');
+            resBadge.innerText = resGrade;
+            resBadge.className = 'chk-badge ' + (resGrade === 'PASS' ? 'badge-success' : (resGrade === 'FAILED' ? 'badge-danger' : 'badge-warning'));
+            
+            document.getElementById('audit-cert-res').innerText = resGrade;
+            document.getElementById('audit-cert-res').className = resGrade === 'PASS' ? 'text-success' : 'text-error';
+            
+            const certs = latest.dataset_certification || {};
+            document.getElementById('audit-cert-ticks').innerText = certs.raw_ticks || 'PASS';
+            document.getElementById('audit-cert-ticks').className = certs.raw_ticks === 'PASS' ? 'text-success' : 'text-error';
+            
+            document.getElementById('audit-cert-indicators').innerText = certs.indicators || 'PASS';
+            document.getElementById('audit-cert-indicators').className = certs.indicators === 'PASS' ? 'text-success' : 'text-error';
+            
+            document.getElementById('audit-cert-decisions').innerText = certs.decisions || 'PASS';
+            document.getElementById('audit-cert-decisions').className = certs.decisions === 'PASS' ? 'text-success' : 'text-error';
+            
+            document.getElementById('audit-cert-trades').innerText = certs.trades || 'PASS';
+            document.getElementById('audit-cert-trades').className = certs.trades === 'PASS' ? 'text-success' : 'text-error';
+            
+            document.getElementById('audit-meta-conf').innerText = latest.audit_config_hash || '--';
+        }
         
         // Populate historical manifest timeline registry
         const timelineBody = document.getElementById('audit-timeline-body');
         if (timelineBody) {
             timelineBody.innerHTML = '';
-            manifest.slice(-10).reverse().forEach(entry => {
-                const tr = document.createElement('tr');
-                const gradeClass = entry.research_certification === 'PASS' ? 'text-success' : 'text-error';
-                tr.innerHTML = `
-                    <td class="mono-font">${entry.market_date}</td>
-                    <td><span class="${gradeClass} font-bold">${entry.research_certification}</span></td>
-                    <td class="mono-font font-bold">${entry.confidence_score.toFixed(2)}%</td>
-                    <td class="mono-font">${entry.audit_config_hash}</td>
-                `;
-                timelineBody.appendChild(tr);
-            });
-            if (manifest.length === 0) {
-                timelineBody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No audit history stored.</td></tr>';
+            if (isDay1) {
+                timelineBody.innerHTML = '<tr><td colspan="4" class="text-center text-secondary font-bold" style="padding: 18px 0;">Research Baseline - Day 1 - No Historical Statistics Yet</td></tr>';
+            } else {
+                manifest.slice(-10).reverse().forEach(entry => {
+                    const tr = document.createElement('tr');
+                    const gradeClass = entry.research_certification === 'PASS' ? 'text-success' : 'text-error';
+                    tr.innerHTML = `
+                        <td class="mono-font">${entry.market_date}</td>
+                        <td><span class="${gradeClass} font-bold">${entry.research_certification}</span></td>
+                        <td class="mono-font font-bold">${entry.confidence_score.toFixed(2)}%</td>
+                        <td class="mono-font">${entry.audit_config_hash}</td>
+                    `;
+                    timelineBody.appendChild(tr);
+                });
             }
         }
     } catch(e) {
