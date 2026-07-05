@@ -19,22 +19,41 @@ class MaintenanceService:
     def _run_eod_tasks(self):
         logger.info("=== STARTING 3:35 PM EOD MAINTENANCE ===")
         try:
-            # 0. Run Gap Fill first so archive and validator operate on complete data
-            logger.info("Running EOD Gap Fill Service before archival...")
+            # 1. Gap Fill patches incomplete records
+            logger.info("[EOD Step 1] Running EOD Gap Fill Service...")
             try:
                 from src.services.gap_fill_service import run_gap_fill
                 run_gap_fill(days_back=5)
             except Exception as gap_exc:
                 logger.error(f"Gap Fill Service error: {gap_exc}")
 
-            # 1. Run Parquet Archiver (direct import — no subprocess path issues)
-            logger.info("Running Parquet Archiver...")
-            from src.utils.parquet_archiver import archive_ml_database, compress_institutional_memory
-            archive_ml_database()
-            compress_institutional_memory()
+            # 2. Indicator Audit & Data Certification
+            logger.info("[EOD Step 2] Running Data Certification Audit...")
+            try:
+                from src.services.indicator_audit_service import run_daily_audit
+                run_daily_audit()
+            except Exception as audit_exc:
+                logger.error(f"Data Certification Audit error: {audit_exc}")
 
-            # 2. Run Nightly Validator (direct import — no subprocess path issues)
-            logger.info("Running ML Data Validator...")
+            # 3. Generate Daily Summary
+            logger.info("[EOD Step 3] Generating EOD Daily Summary...")
+            try:
+                from src.utils.summary_generator import generate_daily_summary
+                generate_daily_summary()
+            except Exception as sum_exc:
+                logger.error(f"EOD Summary Generator error: {sum_exc}")
+
+            # 4. Parquet Archival & Data Compression
+            logger.info("[EOD Step 4] Compressing Parquet Data Lake...")
+            try:
+                from src.utils.parquet_archiver import archive_ml_database, compress_institutional_memory
+                archive_ml_database()
+                compress_institutional_memory()
+            except Exception as arch_exc:
+                logger.error(f"Parquet Archiver error: {arch_exc}")
+
+            # 5. ML Data Validation
+            logger.info("[EOD Step 5] Running ML Data Validation...")
             try:
                 from src.ml_engine.eod_validator import run_eod_validation
                 run_eod_validation()
@@ -43,13 +62,16 @@ class MaintenanceService:
             except Exception as ev:
                 logger.error(f"EOD Validator error: {ev}")
 
-            # 3. Cloud Backup (direct call — no subprocess overhead)
-            logger.info("Running Cloud Backup...")
-            from src.services.cloud_backup import run_backup
-            run_backup()
+            # 6. Cloud Backup of certified data & summaries
+            logger.info("[EOD Step 6] Running Cloud Backup...")
+            try:
+                from src.services.cloud_backup import run_backup
+                run_backup()
+            except Exception as backup_exc:
+                logger.error(f"Cloud Backup error: {backup_exc}")
 
-            # 4. Instrument Registry Synchronization
-            logger.info("Running EOD Instrument Registry Sync...")
+            # 7. Instrument Registry Synchronization
+            logger.info("[EOD Step 7] Running EOD Instrument Registry Sync...")
             try:
                 from src.services.instrument_sync_service import run_sync
                 run_sync()

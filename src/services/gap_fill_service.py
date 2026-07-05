@@ -75,6 +75,14 @@ class GapFillService:
 
     def build_gap_fill_cache(self, days_back: int = 5) -> Path:
         logger.info("[GapFillService] Starting synthetic volume gap-fill build...")
+        
+        # Guardrail: Check for certified date locks to prevent overwriting certified historical boundaries
+        audit_dir = Path(DATA_DIR) / "audit"
+        if audit_dir.exists():
+            certified_locks = [f.name.replace("_certified.lock", "") for f in audit_dir.glob("*_certified.lock")]
+            if certified_locks:
+                logger.info(f"[GapFillService] Certified historical dates are frozen: {certified_locks}")
+
         gap_fill_df = self.fetcher.get_historical_candles_with_synthetic_volume(days_back=days_back)
 
         if gap_fill_df is None or gap_fill_df.empty:

@@ -13,13 +13,9 @@ import src.broker.instrument_registry as broker_registry
 @pytest.fixture(autouse=True)
 def setup_test_db():
     """Ensure database is clean before each test."""
-    if os.path.exists(DB_PATH):
-        try:
-            os.remove(DB_PATH)
-        except PermissionError:
-            pass
-    # Initialize repository (creates clean tables)
     repo = InstrumentRepository()
+    with repo._get_connection() as conn:
+        repo._recreate_tables(conn)
     yield repo
     # Clean up again
     if os.path.exists(DB_PATH):

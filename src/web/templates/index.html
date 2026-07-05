@@ -3,314 +3,548 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Quant Algorithmic Terminal</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=1.1">
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Inter:wght@400;600&display=swap" rel="stylesheet">
-    <!-- Ionicons for modern icons -->
+    <title>Quant Console 2.0 — Operations & Research</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=2.0">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
     <script type="module" src="https://unpkg.com/ionicons@7.1.0/dist/ionicons/ionicons.esm.js"></script>
     <script nomodule src="https://unpkg.com/ionicons@7.1.0/dist/ionicons/ionicons.js"></script>
-
-    
-    <!-- Lightweight Charts (Local file - works in Electron without CSP issues) -->
-    <script src="{{ url_for('static', filename='lightweight-charts.min.js') }}"></script>
 </head>
 <body>
     <div class="app-wrapper">
-        <nav class="top-nav">
-            <div class="nav-brand">
-                <ion-icon name="analytics-outline" class="brand-icon"></ion-icon>
-                <h1>Quant <span>Terminal</span></h1>
-            </div>
-            <div class="nav-controls">
-                <button class="btn" onclick="window.location.href='/intelligence_lab'" title="Open Intelligence Lab" style="margin-right: 15px; display: flex; align-items: center; gap: 6px;">
-                    <ion-icon name="flask-outline" style="font-size: 1.1em;"></ion-icon> Intelligence Lab
-                </button>
-                <button id="theme-toggle" class="icon-btn" onclick="toggleTheme()" title="Toggle Light/Dark Theme">
-                    <ion-icon name="moon-outline" id="theme-icon"></ion-icon>
-                </button>
-                <button id="settings-btn" class="icon-btn" onclick="openSettings()" title="API Settings">
-                    <ion-icon name="settings-outline"></ion-icon>
-                </button>
-                <div class="system-mode-indicator" id="system-mode-indicator" style="display:flex; flex-direction:column; align-items:center; margin-right: 15px; padding: 5px 15px; border-radius: 6px; background: rgba(0,0,0,0.2); border: 1px solid var(--border);">
-                    <div style="font-size: 11px; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 1px;" id="sys-mode-top">RESEARCH MODE</div>
-                    <div style="font-size: 13px; font-weight: 800; color: var(--primary);" id="sys-mode-bottom">API OFF</div>
+        <!-- Compact Bloomberg Header -->
+        <header class="top-nav">
+            <div class="nav-left">
+                <div class="nav-brand">
+                    <ion-icon name="terminal" class="brand-icon"></ion-icon>
+                    <h1>QUANT // <span>OPS_CONSOLE_2.0</span></h1>
                 </div>
-                <div class="status-indicator" style="display: none;">
-                    <span id="status-dot" class="dot dot-offline"></span>
-                    <span id="status-text">OFFLINE</span>
-                </div>
-                <!-- Autonomous mode: No start/stop buttons -->
-            </div>
-        </nav>
-
-        <main class="container">
-            <!-- Live Error Banner -->
-            <div id="error-banner" class="error-banner" style="display: none;">
-                <div class="error-header">
-                    <ion-icon name="warning"></ion-icon>
-                    <strong>System Alerts</strong>
-                </div>
-                <ul id="error-list"></ul>
-            </div>
-
-            <div class="service-status-panel glass-panel">
-                <div class="service-status-header">
-                    <div>
-                        <div class="status-title">Service Status</div>
-                        <div class="status-subtitle">Quant Engine and service health summary</div>
-                    </div>
-                    <div class="status-pill" id="service-status-tag">Loading...</div>
-                </div>
-                <div class="service-status-grid">
-                    <div class="service-status-card">
-                        <span class="service-status-label">Engine PID</span>
-                        <span class="service-status-value" id="svc-engine-pid">--</span>
-                    </div>
-                    <div class="service-status-card">
-                        <span class="service-status-label">Services Running</span>
-                        <span class="service-status-value" id="svc-running-count">--</span>
-                    </div>
-                    <div class="service-status-card">
-                        <span class="service-status-label">Services Failed</span>
-                        <span class="service-status-value" id="svc-failed-count">--</span>
-                    </div>
-                    <div class="service-status-card">
-                        <span class="service-status-label">Last Refresh</span>
-                        <span class="service-status-value" id="svc-last-refresh">--</span>
-                    </div>
+                <!-- Mode Selector -->
+                <div class="mode-selector">
+                    <button class="mode-btn active" id="btn-mode-auto" onclick="setDashboardMode('AUTO')">AUTO</button>
+                    <button class="mode-btn" id="btn-mode-live" onclick="setDashboardMode('LIVE')">LIVE</button>
+                    <button class="mode-btn" id="btn-mode-research" onclick="setDashboardMode('RESEARCH')">RESEARCH</button>
                 </div>
             </div>
             
-            <div class="grid-telemetry">
-                <div class="card card-anchor glass-panel">
-                    <h3>Anchor Symbol</h3>
-                    <div class="value highlight-text" id="val-symbol">--</div>
+            <div class="header-summary-grid">
+                <div class="summary-item">
+                    <span class="lbl">STATUS</span>
+                    <span class="val text-success" id="hdr-engine-status">ACTIVE</span>
                 </div>
-                <div class="card glass-panel">
-                    <h3>LTP <span id="ltp-time" class="time-sub"></span></h3>
-                    <div class="value" id="val-ltp">--</div>
+                <div class="summary-item">
+                    <span class="lbl">LIFECYCLE</span>
+                    <span class="val highlight" id="hdr-lifecycle">OFFLINE</span>
                 </div>
-                <div class="card glass-panel flex-row">
-                    <div class="card-col">
-                        <h3>Volume <span id="volume-time" class="time-sub"></span></h3>
-                        <div class="value" id="val-volume">--</div>
-                    </div>
-                    <div class="volume-bar-vertical-track">
-                        <div id="volume-bar" class="volume-bar-vertical-fill"></div>
-                    </div>
+                <div class="summary-item">
+                    <span class="lbl">SERVICES</span>
+                    <span class="val" id="hdr-services">0/0</span>
                 </div>
-                <div class="card glass-panel">
-                    <h3>9 EMA</h3>
-                    <div class="value" id="val-ema">--</div>
+                <div class="summary-item">
+                    <span class="lbl">SYS CPU</span>
+                    <span class="val" id="hdr-sys-cpu">0.0%</span>
                 </div>
-                <div class="card glass-panel">
-                    <h3>VWAP</h3>
-                    <div class="value" id="val-vwap">--</div>
+                <div class="summary-item">
+                    <span class="lbl">PLAT CPU</span>
+                    <span class="val highlight" id="hdr-plat-cpu">0.0%</span>
                 </div>
-                <div class="card glass-panel">
-                    <div class="card-label">VFI (RAW / EMA)</div>
-                    <div class="card-value value" id="val-vfi">--</div>
+                <div class="summary-item">
+                    <span class="lbl">SYS RAM</span>
+                    <span class="val" id="hdr-ram">0.0%</span>
+                </div>
+                <div class="summary-item">
+                    <span class="lbl">TRADES</span>
+                    <span class="val highlight-gold" id="hdr-trades">0</span>
+                </div>
+                <div class="summary-item">
+                    <span class="lbl">LAST UPDATE</span>
+                    <span class="val" id="hdr-last-update">--:--:--</span>
                 </div>
             </div>
+        </header>
+
+        <!-- Main Grid Layout -->
+        <main class="container grid-layout">
             
-            <div class="chart-panel glass-panel">
-                <div class="chart-header-row">
-                    <div class="trade-header">
-                        <ion-icon name="analytics-outline" class="alert-icon"></ion-icon>
-                        <h2>LIVE CHART</h2>
+            <!-- LIVE VIEW MODE WRAPPER -->
+            <div class="contents-group col-span-3 grid-layout" id="live-mode-group">
+                <!-- SECTION 1: Engine Overview -->
+                <div class="card flat-panel">
+                    <div class="card-header">
+                        <h2>[01] ENGINE OVERVIEW</h2>
                     </div>
+                    <div class="overview-list">
+                        <div class="overview-item">
+                            <span>Status</span>
+                            <span id="val-engine-status" class="font-bold text-success">ACTIVE</span>
+                        </div>
+                        <div class="overview-item">
+                            <span>Lifecycle State</span>
+                            <span id="val-lifecycle-state" class="highlight font-bold">--</span>
+                        </div>
+                        <div class="overview-item">
+                            <span>Uptime</span>
+                            <span id="val-engine-uptime" class="mono-font">0s</span>
+                        </div>
+                        <div class="overview-item">
+                            <span>Platform Version</span>
+                            <span id="val-platform-ver" class="mono-font">1.0.0</span>
+                        </div>
+                        <div class="overview-item">
+                            <span>Engine PID</span>
+                            <span id="val-engine-pid" class="mono-font">--</span>
+                        </div>
+                    </div>
+                </div>
 
+                <!-- SECTION 2: Service Monitor -->
+                <div class="card flat-panel col-span-2">
+                    <div class="card-header">
+                        <h2>[02] SERVICE MONITOR</h2>
+                    </div>
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Service</th>
+                                    <th>Status</th>
+                                    <th>PID</th>
+                                    <th>CPU %</th>
+                                    <th>Memory</th>
+                                    <th>Threads</th>
+                                    <th>Restarts</th>
+                                    <th>Uptime</th>
+                                </tr>
+                            </thead>
+                            <tbody id="service-table-body">
+                                <!-- Dynamic rows -->
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
-                <div class="chart-wrapper">
-                    <div id="chart-legend" class="chart-legend">
-                        <span class="legend-symbol" id="legend-symbol-display">--</span>
-                        <span>O: <span id="legend-o">--</span></span>
-                        <span>H: <span id="legend-h">--</span></span>
-                        <span>L: <span id="legend-l">--</span></span>
-                        <span>C: <span id="legend-c">--</span></span>
-                        <span>Vol: <span id="legend-v">--</span></span>
-                        <span class="legend-divider">|</span>
-                        <span class="legend-vwap">VWAP: <span id="legend-vwap">--</span></span>
-                        <span class="legend-ema">EMA9: <span id="legend-ema">--</span></span>
+
+                <!-- SECTION 3: Runtime Performance -->
+                <div class="card flat-panel">
+                    <div class="card-header">
+                        <h2>[03] RUNTIME PERFORMANCE</h2>
                     </div>
-                    <div id="tv-chart" class="tv-chart-container"></div>
-                    <div class="chart-toolbar-floating" id="chart-toolbar">
-                        <button class="floating-btn" onclick="chartZoomOut()" title="Zoom Out">
-                            <ion-icon name="remove-outline"></ion-icon>
-                        </button>
-                        <button class="floating-btn" onclick="chartZoomIn()" title="Zoom In">
-                            <ion-icon name="add-outline"></ion-icon>
-                        </button>
-                        <button class="floating-btn" onclick="chartScrollLeft()" title="Scroll Left">
-                            <ion-icon name="chevron-back-outline"></ion-icon>
-                        </button>
-                        <button class="floating-btn" onclick="chartScrollRight()" title="Scroll Right">
-                            <ion-icon name="chevron-forward-outline"></ion-icon>
-                        </button>
-                        <button class="floating-btn" onclick="chartResetZoom()" title="Reset Scale">
-                            <ion-icon name="refresh-outline"></ion-icon>
-                        </button>
+                    <div class="perf-stats-grid">
+                        <div class="perf-metric">
+                            <span class="lbl">System CPU</span>
+                            <span class="val" id="perf-cpu-sys">0.0%</span>
+                        </div>
+                        <div class="perf-metric">
+                            <span class="lbl">Platform CPU</span>
+                            <span class="val highlight" id="perf-cpu-plat">0.0%</span>
+                        </div>
+                        <div class="perf-metric">
+                            <span class="lbl">System RAM</span>
+                            <span class="val" id="perf-ram-total">0.0%</span>
+                        </div>
+                        <div class="perf-metric">
+                            <span class="lbl">Platform Threads</span>
+                            <span class="val" id="perf-threads">0</span>
+                        </div>
+                        <div class="perf-metric">
+                            <span class="lbl">Peak CPU (Sys)</span>
+                            <span class="val" id="perf-cpu-peak">0.0%</span>
+                        </div>
+                        <div class="perf-metric">
+                            <span class="lbl">Peak RAM</span>
+                            <span class="val" id="perf-ram-peak">0.0%</span>
+                        </div>
                     </div>
-                    <div id="candle-timer" class="candle-timer" style="display: none;">00:00</div>
                 </div>
-                <div class="chart-wrapper">
-                    <div id="vfi-legend" class="chart-legend">
-                        <span class="legend-vfi">VFI: <span id="legend-vfi">--</span></span>
-                        <span class="legend-ema">EMA: <span id="legend-vfi-ema">--</span></span>
+
+                <!-- SECTION 4: Decision Funnel -->
+                <div class="card flat-panel">
+                    <div class="card-header">
+                        <h2>[04] DECISION FUNNEL</h2>
                     </div>
-                    <div id="vfi-chart" class="vfi-chart-container"></div>
+                    <div class="funnel-container">
+                        <div class="funnel-stage" id="funnel-observed">
+                            <span class="stage-name">OBSERVED</span>
+                            <span class="stage-val">0</span>
+                            <span class="stage-meta">100%</span>
+                        </div>
+                        <div class="funnel-arrow"><ion-icon name="chevron-down-outline"></ion-icon></div>
+                        <div class="funnel-stage" id="funnel-candidate">
+                            <span class="stage-name">CANDIDATE</span>
+                            <span class="stage-val">0</span>
+                            <span class="stage-meta" id="pct-candidate">0.0%</span>
+                        </div>
+                        <div class="funnel-arrow"><ion-icon name="chevron-down-outline"></ion-icon></div>
+                        <div class="funnel-stage" id="funnel-filtered">
+                            <span class="stage-name">FILTERED</span>
+                            <span class="stage-val">0</span>
+                            <span class="stage-meta" id="pct-filtered">0.0%</span>
+                        </div>
+                        <div class="funnel-arrow"><ion-icon name="chevron-down-outline"></ion-icon></div>
+                        <div class="funnel-stage" id="funnel-sniper">
+                            <span class="stage-name">SNIPER</span>
+                            <span class="stage-val">0</span>
+                            <span class="stage-meta" id="pct-sniper">0.0%</span>
+                        </div>
+                        <div class="funnel-arrow"><ion-icon name="chevron-down-outline"></ion-icon></div>
+                        <div class="funnel-stage" id="funnel-executed">
+                            <span class="stage-name">EXECUTED</span>
+                            <span class="stage-val">0</span>
+                            <span class="stage-meta" id="pct-executed">0.0%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SECTION 5: Strategy Activity -->
+                <div class="card flat-panel">
+                    <div class="card-header">
+                        <h2>[05] STRATEGY ACTIVITY</h2>
+                    </div>
+                    <div class="overview-list">
+                        <div class="overview-item">
+                            <span>Market Regime</span>
+                            <span id="val-market-regime">--</span>
+                        </div>
+                        <div class="overview-item">
+                            <span>Anchor Token</span>
+                            <span id="val-anchor-symbol" class="mono-font">--</span>
+                        </div>
+                        <div class="overview-item">
+                            <span>Last Target</span>
+                            <span id="val-last-signal" class="font-bold">NONE</span>
+                        </div>
+                        <div class="overview-item">
+                            <span>Active Setup</span>
+                            <span id="val-latest-action">NONE</span>
+                        </div>
+                        <div class="overview-item flex-col-align-start">
+                            <span>Last Evaluation Rejection</span>
+                            <small id="val-last-rejection" class="text-warning mono-font" style="word-break: break-all;">--</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SECTION 6: Dataset Health -->
+                <div class="card flat-panel col-span-2" id="sec-dataset-health">
+                    <div class="card-header">
+                        <h2>[06] DATASET HEALTH (ADAPTIVE AVERAGES)</h2>
+                    </div>
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Dataset Name</th>
+                                    <th>Size on Disk</th>
+                                    <th>Today's Rows</th>
+                                    <th>Expected Rows (Avg)</th>
+                                    <th>Missing %</th>
+                                    <th>Status</th>
+                                    <th>Last Flush</th>
+                                </tr>
+                            </thead>
+                            <tbody id="dataset-table-body">
+                                <!-- Dynamic rows -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- SECTION 7: Runtime Validation -->
+                <div class="card flat-panel" id="sec-runtime-val">
+                    <div class="card-header">
+                        <h2>[07] CONTINUOUS RUNTIME VALIDATION</h2>
+                    </div>
+                    <div class="overview-list" id="runtime-checklist">
+                        <!-- Dynamic list -->
+                    </div>
                 </div>
             </div>
 
-            <div class="active-trade-panel glass-panel pulse-border" id="active-trade-panel" style="display: none;">
-                <div class="trade-header">
-                    <ion-icon name="warning-outline" class="alert-icon"></ion-icon>
-                    <h2>ACTIVE PAPER TRADE</h2>
+            <!-- RESEARCH VIEW MODE WRAPPER -->
+            <div class="contents-group col-span-3 grid-layout" id="research-mode-group" style="display: none;">
+                <!-- EOD SESSION SUMMARIES -->
+                <div class="card flat-panel col-span-2">
+                    <div class="card-header flex-row-between">
+                        <h2>[R1] HISTORICAL SESSION SUMMARIES</h2>
+                        <div class="summary-tab-buttons">
+                            <button class="tab-btn active" onclick="loadSummaries('daily')">DAILY</button>
+                            <button class="tab-btn" onclick="loadSummaries('weekly')">WEEKLY</button>
+                            <button class="tab-btn" onclick="loadSummaries('monthly')">MONTHLY</button>
+                        </div>
+                    </div>
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Market Date</th>
+                                    <th>Trades</th>
+                                    <th>Win Rate</th>
+                                    <th>Net PnL</th>
+                                    <th>Avg Hold Time</th>
+                                    <th>Avg Premium Exp</th>
+                                    <th>CPU Peak</th>
+                                    <th>RAM Peak</th>
+                                </tr>
+                            </thead>
+                            <tbody id="summary-table-body">
+                                <!-- Dynamic summaries -->
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
-                <div class="trade-grid">
-                    <div>
-                        <label>Contract</label>
-                        <div class="val" id="trade-symbol">--</div>
+
+                <!-- METADATA & DATA QUALITY -->
+                <div class="card flat-panel">
+                    <div class="card-header">
+                        <h2>[R2] DATA QUALITY AUDIT (LATEST EOD)</h2>
                     </div>
-                    <div>
-                        <label>Entry Price</label>
-                        <div class="val">₹<span id="trade-entry">--</span></div>
-                    </div>
-                    <div>
-                        <label>Target (Strict 10%)</label>
-                        <div class="val">₹<span id="trade-target">--</span></div>
-                    </div>
-                    <div>
-                        <label>Live Premium</label>
-                        <div class="val live">₹<span id="trade-ltp">--</span></div>
+                    <div class="overview-list" id="dq-checklist">
+                        <div class="overview-item">
+                            <span>Ticks Collected</span>
+                            <strong id="dq-ticks">0</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Features Written</span>
+                            <strong id="dq-features">0</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Decisions Logged</span>
+                            <strong id="dq-decisions">0</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Trades Logged</span>
+                            <strong id="dq-trades">0</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Log Write Errors</span>
+                            <strong id="dq-errors" class="text-warning">0</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Last Parquet Flush</span>
+                            <strong id="dq-flush">--</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Last Cloud Backup</span>
+                            <strong id="dq-backup">--</strong>
+                        </div>
                     </div>
                 </div>
-                
-                <div class="delta-panel">
-                    <h3>Order Flow (Volume Delta)</h3>
-                    <div class="delta-metrics">
-                        <div class="metric buy-vol">
-                            <span class="label">Buy Vol</span>
-                            <span class="value" id="trade-buy-vol">0</span>
+
+                <!-- RESEARCH PERFORMANCE METRICS -->
+                <div class="card flat-panel">
+                    <div class="card-header">
+                        <h2>[R3] RESEARCH PORTFOLIO METRICS</h2>
+                    </div>
+                    <div class="overview-list">
+                        <div class="overview-item">
+                            <span>Win Rate (Today)</span>
+                            <strong id="r-win-rate">0.0%</strong>
                         </div>
-                        <div class="metric net-delta">
-                            <span class="label">Net Delta</span>
-                            <span class="value highlight" id="trade-net-delta">0</span>
+                        <div class="overview-item">
+                            <span>Average Hold Time</span>
+                            <strong id="r-hold-time">0m</strong>
                         </div>
-                        <div class="metric sell-vol">
-                            <span class="label">Sell Vol</span>
-                            <span class="value" id="trade-sell-vol">0</span>
+                        <div class="overview-item">
+                            <span>Average MFE</span>
+                            <strong id="r-mfe" class="text-success">+0.00%</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Average MAE</span>
+                            <strong id="r-mae" class="text-error">-0.00%</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Total Win/Loss Count</span>
+                            <strong id="r-win-loss">0W / 0L</strong>
                         </div>
                     </div>
-                    <div class="delta-progress-track">
-                        <div class="delta-progress-fill buy-fill" id="delta-buy-bar" style="width: 50%;"></div>
-                        <div class="delta-progress-fill sell-fill" id="delta-sell-bar" style="width: 50%;"></div>
+                </div>
+
+                <!-- METADATA PROVENANCE SUMMARY -->
+                <div class="card flat-panel col-span-2">
+                    <div class="card-header">
+                        <h2>[R4] LATEST SUMMARY PROVENANCE METADATA</h2>
+                    </div>
+                    <div class="overview-list grid-layout" style="grid-template-columns: repeat(2, 1fr); padding: 10px 0;">
+                        <div class="overview-item">
+                            <span>Summary Schema</span>
+                            <strong id="meta-summary-ver">--</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Engine Version</span>
+                            <strong id="meta-engine-ver">--</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Git Commit SHA</span>
+                            <strong id="meta-git-commit" class="mono-font">--</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Strategy Config Hash</span>
+                            <strong id="meta-strat-hash" class="mono-font">--</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Generated Timestamp</span>
+                            <strong id="meta-generated-at" class="mono-font">--</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Market Date Key</span>
+                            <strong id="meta-market-date" class="mono-font">--</strong>
+                        </div>
                     </div>
                 </div>
             </div>
 
-            <div class="metrics-panel glass-panel">
-                <div class="metric-box">
-                    <div class="metric-label">Realized P&L</div>
-                    <div id="metric-realized" class="metric-val">₹0.00</div>
+            <!-- SECTION 8: Strategy Level Statistics (Dense table) -->
+            <div class="card flat-panel col-span-3">
+                <div class="card-header">
+                    <h2>[08] STRATEGY LEVEL STATISTICS</h2>
                 </div>
-                <div class="metric-box">
-                    <div class="metric-label">Total ROI (%)</div>
-                    <div id="metric-roi" class="metric-val">0.00%</div>
-                </div>
-                <div class="metric-box">
-                    <div class="metric-label">Avg Capital Used</div>
-                    <div id="metric-avg-cap" class="metric-val neutral">₹0.00</div>
-                </div>
-                <div class="metric-box">
-                    <div class="metric-label">Median Capital</div>
-                    <div id="metric-med-cap" class="metric-val neutral">₹0.00</div>
-                </div>
-            </div>
-
-            <div class="history-panel glass-panel">
-                <h2><ion-icon name="list-outline"></ion-icon> Trade History</h2>
                 <div class="table-container">
                     <table class="data-table">
                         <thead>
                             <tr>
-                                <th>#</th>
-                                <th>Time</th>
-                                <th>Duration</th>
-                                <th>Strategy</th>
-                                <th>Contract / DTE</th>
-                                <th>Entry ₹</th>
-                                <th>Exit ₹</th>
-                                <th>Opt %</th>
-                                <th>Idx Pts</th>
-                                <th>Gross P&L</th>
-                                <th>Result</th>
-                                <th>Chart</th>
+                                <th>Strategy Block</th>
+                                <th>Observed Ticks</th>
+                                <th>Candidates Triggered</th>
+                                <th>Filtered Out</th>
+                                <th>Rejected check</th>
+                                <th>Expired (Sniper)</th>
+                                <th>Executed Trades</th>
+                                <th>Win % (Historical)</th>
+                                <th>Avg Premium Expansion</th>
                             </tr>
                         </thead>
-                        <tbody id="history-table-body">
-                            <!-- Dynamic Content -->
+                        <tbody id="strategy-stats-body">
+                            <!-- Dynamic strategy stats -->
                         </tbody>
                     </table>
                 </div>
-                <div id="no-trades" class="empty-state">
-                    <ion-icon name="cafe-outline"></ion-icon>
-                    <p>No trades executed today. Scanning the market...</p>
+            </div>
+
+            <!-- SECTION 9: Startup Validation Checklist -->
+            <div class="card flat-panel col-span-3">
+                <div class="card-header">
+                    <h2>[09] ONE-OFF STARTUP HEALTH VALIDATION</h2>
+                </div>
+                <div class="startup-checklist-grid" id="startup-checklist">
+                    <!-- Dynamic startup validation checklist cards -->
                 </div>
             </div>
+
+            <!-- SECTION 10: Structured Log Explorer -->
+            <div class="card flat-panel col-span-3">
+                <div class="card-header flex-row-between">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <h2>[10] STRUCTURED LOG EXPLORER</h2>
+                    </div>
+                    <div class="log-controls">
+                        <select id="log-service-select" class="mono-font" onchange="loadLogs()">
+                            <option value="start_all">start_all (supervisor)</option>
+                            <option value="feed_service">feed_service</option>
+                            <option value="brain_service" selected>brain_service</option>
+                            <option value="decision_journal">decision_journal</option>
+                            <option value="research_service">research_collector</option>
+                            <option value="health_service">health_monitor</option>
+                            <option value="maintenance_service">maintenance_service</option>
+                            <option value="gap_fill_service">gap_fill_service</option>
+                            <option value="cloud_backup">cloud_backup</option>
+                            <option value="web_dashboard">web_dashboard</option>
+                        </select>
+                        <div class="severity-buttons">
+                            <button class="severity-btn active" data-severity="" onclick="setLogSeverity(this)">ALL</button>
+                            <button class="severity-btn text-success" data-severity="SUCCESS" onclick="setLogSeverity(this)">SUCCESS</button>
+                            <button class="severity-btn text-warning" data-severity="WARNING" onclick="setLogSeverity(this)">WARN</button>
+                            <button class="severity-btn text-error" data-severity="ERROR" onclick="setLogSeverity(this)">ERROR</button>
+                        </div>
+                        <input type="text" id="log-search-input" placeholder="Search logs..." oninput="loadLogs()">
+                    </div>
+                </div>
+                <div class="log-console-container">
+                    <pre id="log-console" class="mono-font">Loading logs...</pre>
+                </div>
+            </div>
+
+            <!-- SECTION 11: Market Data Integrity Panel -->
+            <div class="card flat-panel col-span-2">
+                <div class="card-header flex-row-between">
+                    <h2>[11] MARKET DATA INTEGRITY (PHASE 2C CERTIFICATION)</h2>
+                    <div style="display:flex; gap:12px; align-items:center;">
+                        <span class="lbl font-bold" style="font-size:10px;">CONFIDENCE:</span>
+                        <strong id="audit-score-badge" class="highlight-gold" style="font-family:var(--font-mono); font-size:13px;">100.0%</strong>
+                        <span id="audit-status-badge" class="chk-badge badge-success">PASS</span>
+                    </div>
+                </div>
+                <div class="grid-layout" style="grid-template-columns: 1fr 1.5fr; gap: 12px; margin-top: 4px;">
+                    <!-- Diagnostics & Hashes -->
+                    <div class="overview-list">
+                        <div class="overview-item">
+                            <span>Research Certification</span>
+                            <strong id="audit-cert-res" class="text-success">PASS</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Raw Ticks Dataset</span>
+                            <strong id="audit-cert-ticks" class="text-success">PASS</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Indicator Dataset</span>
+                            <strong id="audit-cert-indicators" class="text-success">PASS</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Decision Dataset</span>
+                            <strong id="audit-cert-decisions" class="text-success">PASS</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Trade Dataset</span>
+                            <strong id="audit-cert-trades" class="text-success">PASS</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Audit Config Hash</span>
+                            <strong id="audit-meta-conf" class="mono-font">--</strong>
+                        </div>
+                    </div>
+                    <!-- Certification timeline -->
+                    <div class="table-container" style="border-left: 1px solid var(--border); padding-left: 12px; max-height: 160px; overflow-y: auto;">
+                        <span class="lbl text-secondary" style="font-size:9px; font-weight:700; display:block; margin-bottom:4px;">HISTORICAL CERTIFICATION TIMELINE</span>
+                        <table class="data-table" style="font-size:10px;">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Grade</th>
+                                    <th>Confidence</th>
+                                    <th>Config Hash</th>
+                                </tr>
+                            </thead>
+                            <tbody id="audit-timeline-body">
+                                <!-- Manifest rows -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SECTION 12: Indicator Double-line Overlay Charts -->
+            <div class="card flat-panel">
+                <div class="card-header flex-row-between">
+                    <h2>[12] DOUBLE-LINE OVERLAY TRENDS (ENGINE VS REFERENCE)</h2>
+                    <span class="lbl text-secondary" style="font-size:8px; font-family:var(--font-mono);">SOLID: ENG // DASHED: REF</span>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:8px; width:100%; height:100%;">
+                    <div style="position:relative; width:100%; height:85px; background:#000;">
+                        <canvas id="chart-price-canvas" style="position:absolute; top:0; left:0; width:100%; height:100%;"></canvas>
+                    </div>
+                    <div style="position:relative; width:100%; height:75px; background:#000;">
+                        <canvas id="chart-vfi-canvas" style="position:absolute; top:0; left:0; width:100%; height:100%;"></canvas>
+                    </div>
+                </div>
+            </div>
+
         </main>
-        
+
         <footer>
-            <p>Created by <strong>Amarjeet Singh</strong></p>
+            <div class="footer-content">
+                <span>INSTITUTIONAL QUANT OPS CONSOLE // VER 1.0.0</span>
+                <span>ARCHITECTURE FREEZE ACTIVE // observation phase</span>
+            </div>
         </footer>
     </div>
-    
-    <!-- Modal for Settings -->
-    <div id="settings-modal" class="modal-overlay" style="display:none;">
-        <div class="modal-content glass-panel">
-            <div class="modal-header">
-                <h2><ion-icon name="key-outline"></ion-icon> API Settings</h2>
-                <button class="close-btn" onclick="closeSettings()"><ion-icon name="close-outline"></ion-icon></button>
-            </div>
-            <div class="modal-body">
-                <p class="modal-desc">Configure your Broker API keys. Changes will take effect immediately upon saving.</p>
-                
-                <div class="form-group">
-                    <label>Angel One API Key</label>
-                    <input type="password" id="inp-api-key" placeholder="Enter API Key">
-                </div>
-                <div class="form-group">
-                    <label>Client ID</label>
-                    <input type="text" id="inp-client-id" placeholder="Enter Client ID">
-                </div>
-                <div class="form-group">
-                    <label>Password</label>
-                    <input type="password" id="inp-password" placeholder="Enter Password (PIN)">
-                </div>
-                <div class="form-group">
-                    <label>TOTP Secret</label>
-                    <input type="password" id="inp-totp" placeholder="Enter TOTP Secret">
-                </div>
-                
-                <div class="form-actions">
-                    <button class="btn btn-primary" onclick="saveSettings()" id="btn-save-settings">Save Configurations</button>
-                    <span id="settings-msg"></span>
-                </div>
-            </div>
-        </div>
-    </div>
 
-    <!-- Modal for Bid/Ask Spread -->
-    <div id="spread-modal" class="modal-overlay" style="display:none;">
-        <div class="modal-content glass-panel spread-content">
-            <div class="modal-header">
-                <h2>Bid/Ask Spread at Entry</h2>
-                <button class="close-btn" onclick="document.getElementById('spread-modal').style.display='none'"><ion-icon name="close-outline"></ion-icon></button>
-            </div>
-            <pre id="spread-data"></pre>
-        </div>
-    </div>
-
-    <script src="{{ url_for('static', filename='app.js') }}?v=19"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=2.0"></script>
 </body>
 </html>

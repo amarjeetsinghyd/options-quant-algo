@@ -53,6 +53,13 @@ def main():
         
     redirect_stdout_stderr()
     
+    print("[bootstrap] Running Startup Validation...")
+    try:
+        from src.utils.startup_validation import run_startup_validation
+        run_startup_validation(BASE_DIR)
+    except Exception as e:
+        print(f"[bootstrap] WARNING: Startup Validation failed to run: {e}", file=sys.stderr)
+        
     print(f"[bootstrap] Starting Quant Engine Supervisor (PID {os.getpid()})...")
     
     # Import and run start_all

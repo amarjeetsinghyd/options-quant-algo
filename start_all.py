@@ -12,6 +12,8 @@ import os
 import sys
 import signal
 import time
+import socket
+import psutil
 import subprocess
 import datetime as datetime_mod
 from datetime import timedelta, time as dtime
@@ -32,6 +34,9 @@ class _DateTimeWrapper:
 # Expose the wrapper under the name ``datetime`` for backward compatibility.
 datetime = _DateTimeWrapper
 
+from src.utils.file_utils import write_json_atomic
+from src.core.telemetry_aggregator import RuntimeTelemetryAggregator
+
 from src.config.engineering_config import (
     DATA_DIR, 
     LOGS_DIR,
@@ -48,8 +53,8 @@ from src.utils.market_calendar import is_trading_day
 
 logger = get_logger("start_all")
 
-SERVICE_STATUS_FILE = os.path.join(os.path.dirname(__file__), "data", "service_status.json")
-PID_FILE = os.path.join(os.path.dirname(__file__), "data", "quant_engine.pid")
+SERVICE_STATUS_FILE = os.path.join(os.path.dirname(__file__), "runtime", "service_status.json")
+PID_FILE = os.path.join(os.path.dirname(__file__), "runtime", "quant_engine.pid")
 
 # ── Service definitions ───────────────────────────────────────────────────
 SERVICES = [
@@ -221,6 +226,11 @@ class LifecycleManager:
         self.system_health = "STARTING"
         self.transition_history = deque(maxlen=500)
         self.shutdown_manager = ShutdownManager()
+        self.telemetry_aggregator = RuntimeTelemetryAggregator()
+        self.peak_cpu = 0.0
+        self.peak_ram = 0.0
+        self.last_peak_reset = datetime_mod.datetime.now().date()
+        self.runtime_validation = {}
         
         self.service_status: Dict[str, Dict[str, Any]] = {
             svc["name"]: {
@@ -253,18 +263,175 @@ class LifecycleManager:
         except Exception as exc:
             logger.warning("Unable to remove PID file: %s", exc)
 
+    def _run_runtime_validation(self) -> dict:
+        validation = {}
+        
+        # 1. Disk Space
+        try:
+            disk = psutil.disk_usage(os.path.dirname(SERVICE_STATUS_FILE))
+            free_gb = disk.free / (1024**3)
+            validation["disk_space"] = "PASS" if free_gb > 1.0 else ("WARNING" if free_gb > 0.1 else "FAIL")
+        except Exception:
+            validation["disk_space"] = "FAIL"
+            
+        # 2. SQLite Status
+        try:
+            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "instruments.db")
+            if os.path.exists(db_path):
+                import sqlite3
+                conn = sqlite3.connect(db_path, timeout=1.0)
+                conn.execute("SELECT name FROM sqlite_master LIMIT 1")
+                conn.close()
+                validation["sqlite_status"] = "PASS"
+            else:
+                validation["sqlite_status"] = "WARNING"
+        except Exception:
+            validation["sqlite_status"] = "FAIL"
+            
+        # 3. Runtime Folder
+        try:
+            runtime_dir = os.path.dirname(SERVICE_STATUS_FILE)
+            test_file = os.path.join(runtime_dir, ".runtime_test")
+            with open(test_file, "w") as f:
+                f.write("test")
+            os.remove(test_file)
+            validation["runtime_folder"] = "PASS"
+        except Exception:
+            validation["runtime_folder"] = "FAIL"
+            
+        # 4. Broker Connectivity Config
+        env_keys = ["ANGEL_API_KEY", "ANGEL_CLIENT_ID", "ANGEL_PASSWORD", "ANGEL_TOTP_SECRET"]
+        has_creds = all(os.environ.get(k) or os.getenv(k) for k in env_keys)
+        validation["broker_connectivity"] = "PASS" if has_creds else "WARNING"
+        
+        # 5. Service Health
+        any_failed = False
+        for name, status in self.service_status.items():
+            svc_def = next((s for s in self.services if s["name"] == name), None)
+            if svc_def and not svc_def.get("enabled", True):
+                continue
+            if status.get("state") in ["failed", "exited"] and status.get("return_code", 0) != 0:
+                any_failed = True
+                break
+        validation["service_health"] = "FAIL" if any_failed else "PASS"
+        
+        # 6. ZMQ Health
+        zmq_ports = [5555, 5556]
+        zmq_ok = True
+        for port in zmq_ports:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(0.1)
+                try:
+                    s.connect(("127.0.0.1", port))
+                except Exception:
+                    if self.current_state in ["TRADING_LIVE", "TRADING_IDLE"]:
+                        zmq_ok = False
+        validation["zmq_health"] = "PASS" if zmq_ok else "WARNING"
+        
+        # 7. Flask Health
+        flask_ok = False
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.1)
+            try:
+                s.connect(("127.0.0.1", 5000))
+                flask_ok = True
+            except Exception:
+                pass
+        validation["flask_health"] = "PASS" if flask_ok else "WARNING"
+        
+        return validation
+
+    def _collect_child_metrics(self):
+        self.runtime_validation = self._run_runtime_validation()
+        
+        for name, proc in list(self.processes.items()):
+            status = self.service_status.get(name)
+            if status is None:
+                continue
+            
+            if proc is not None and proc.poll() is None:
+                try:
+                    p = psutil.Process(proc.pid)
+                    status["cpu_percent"] = p.cpu_percent(interval=None)
+                    status["memory_mb"] = round(p.memory_info().rss / (1024 * 1024), 2)
+                    status["thread_count"] = p.num_threads()
+                    uptime_seconds = time.time() - p.create_time()
+                    status["uptime_seconds"] = round(uptime_seconds, 1)
+                except Exception:
+                    status["cpu_percent"] = 0.0
+                    status["memory_mb"] = 0.0
+                    status["thread_count"] = 0
+                    status["uptime_seconds"] = 0.0
+            else:
+                status["cpu_percent"] = 0.0
+                status["memory_mb"] = 0.0
+                status["thread_count"] = 0
+                status["uptime_seconds"] = 0.0
+
     def _persist_status(self):
+        try:
+            total_cpu = psutil.cpu_percent(interval=None)
+            total_ram = psutil.virtual_memory().percent
+            
+            # Platform CPU (Supervisor + children)
+            platform_cpu = 0.0
+            try:
+                supervisor_proc = psutil.Process(os.getpid())
+                platform_cpu += supervisor_proc.cpu_percent(interval=None)
+            except Exception:
+                pass
+                
+            for name, proc in self.processes.items():
+                if proc is not None and proc.poll() is None:
+                    try:
+                        p = psutil.Process(proc.pid)
+                        platform_cpu += p.cpu_percent(interval=None)
+                    except Exception:
+                        pass
+            
+            today = datetime_mod.datetime.now().date()
+            if self.last_peak_reset != today:
+                self.peak_cpu = 0.0
+                self.peak_ram = 0.0
+                self.last_peak_reset = today
+                
+            self.peak_cpu = max(self.peak_cpu, total_cpu)
+            self.peak_ram = max(self.peak_ram, total_ram)
+            
+            total_threads = psutil.Process(os.getpid()).num_threads()
+            for name, proc in self.processes.items():
+                if proc is not None and proc.poll() is None:
+                    try:
+                        total_threads += psutil.Process(proc.pid).num_threads()
+                    except Exception: pass
+        except Exception:
+            total_cpu = 0.0
+            platform_cpu = 0.0
+            total_ram = 0.0
+            total_threads = 1
+
         status_payload = {
+            "schema_version": "2.0.0",
+            "platform_version": "1.0.0",
+            "generated_at": datetime_mod.datetime.now().isoformat(),
             "engine_pid": os.getpid(),
             "lifecycle_state": self.current_state,
             "system_health": self.system_health,
-            "started_at": datetime.now().isoformat(),
-            "services": self.service_status,
-            "last_update": datetime.now().isoformat(),
+            "last_update": datetime_mod.datetime.now().isoformat(),
+            "system_performance": {
+                "system_cpu_percent": total_cpu,
+                "platform_cpu_percent": round(platform_cpu, 1),
+                "total_ram_percent": total_ram,
+                "peak_cpu_percent": self.peak_cpu,
+                "peak_ram_percent": self.peak_ram,
+                "process_count": len([p for p in self.processes.values() if p.poll() is None]) + 1,
+                "thread_count": total_threads
+            },
+            "runtime_validation": self.runtime_validation,
+            "services": self.service_status
         }
         try:
-            with open(SERVICE_STATUS_FILE, "w", encoding="utf-8") as f:
-                json.dump(status_payload, f, indent=2)
+            write_json_atomic(SERVICE_STATUS_FILE, status_payload)
         except Exception as exc:
             logger.warning("Unable to write service status file: %s", exc)
 
@@ -391,6 +558,12 @@ class LifecycleManager:
 
     def start_all(self):
         """Standard NSE boot logic - resolves the state and transitions accordingly."""
+        # Start Telemetry Aggregator helper
+        try:
+            self.telemetry_aggregator.start()
+        except Exception as e:
+            logger.error("Failed to start TelemetryAggregator: %s", e)
+            
         now = datetime_shim.now()
         initial_state = self.lifecycle_policy.determine_state(now)
         self.transition_to_state(initial_state, "Engine Startup")
@@ -480,11 +653,20 @@ class LifecycleManager:
                         self._update_service_status(name, "stopped", pid=proc.pid, return_code=retcode)
                         
             self._evaluate_system_health()
+            self._collect_child_metrics()
+            self._persist_status()
 
     def shutdown(self):
         """Gracefully terminate all running processes."""
         self._shutdown = True
         logger.info("Shutting down all services...")
+        
+        # Stop Telemetry Aggregator helper
+        try:
+            self.telemetry_aggregator.stop()
+        except Exception as e:
+            logger.error("Failed to stop TelemetryAggregator: %s", e)
+            
         for name, proc in list(self.processes.items()):
             self._stop_service_proc(name, proc)
 

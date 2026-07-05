@@ -43,6 +43,11 @@ class BrainService:
         self.fetcher = DataFetcher(self.api)
         self.signal_gen = SignalGenerator()
         self.trader = PaperTrader(self.api, self.fetcher, [])
+        self.strategy_stats = {
+            "Strategy 1": {"observed": 0, "candidate": 0, "filtered": 0, "executed": 0, "rejected": 0, "expired": 0},
+            "Strategy 2": {"observed": 0, "candidate": 0, "filtered": 0, "executed": 0, "rejected": 0, "expired": 0},
+            "Strategy 3": {"observed": 0, "candidate": 0, "filtered": 0, "executed": 0, "rejected": 0, "expired": 0},
+        }
         self.gamma_collector = GammaEventCollector()
         self.strike_intelligence = StrikeIntelligenceModule()
         
@@ -456,31 +461,47 @@ class BrainService:
                                 "machine_state": {}
                             }
                         else:
-                            # 3-Tier Trace Levels evaluation:
-                            # Level 0 (generate_trace=False) for fast evaluations.
-                            # Level 1 (generate_trace=True) only if a candidate triggers.
-                            signal, decision_state = self.signal_gen.check_signal(self.current_df, generate_trace=False)
-                            if signal:
+                            # Increment Observed counts
+                            self.strategy_stats["Strategy 1"]["observed"] += 1
+                            self.strategy_stats["Strategy 2"]["observed"] += 1
+                            self.strategy_stats["Strategy 3"]["observed"] += 1
+                            
+                            triggered_strategy = None
+                            
+                            s1_sig, s1_state = self.signal_gen.check_signal(self.current_df, generate_trace=False)
+                            if s1_sig:
+                                triggered_strategy = "Strategy 1"
+                                self.strategy_stats["Strategy 1"]["candidate"] += 1
+                                self.strategy_stats["Strategy 2"]["rejected"] += 1
+                                self.strategy_stats["Strategy 3"]["rejected"] += 1
                                 signal, decision_state = self.signal_gen.check_signal(self.current_df, generate_trace=True)
                             else:
-                                strat1_reason = decision_state.get("human_reason", "Strategy 1 failed")
-                                strat1_machine = decision_state.get("machine_state", {})
+                                self.strategy_stats["Strategy 1"]["rejected"] += 1
                                 
-                                signal, decision_state = self.signal_gen.check_rejection_signal(self.current_df, generate_trace=False)
-                                if signal:
+                                s2_sig, s2_state = self.signal_gen.check_rejection_signal(self.current_df, generate_trace=False)
+                                if s2_sig:
+                                    triggered_strategy = "Strategy 2"
+                                    self.strategy_stats["Strategy 2"]["candidate"] += 1
+                                    self.strategy_stats["Strategy 3"]["rejected"] += 1
                                     signal, decision_state = self.signal_gen.check_rejection_signal(self.current_df, generate_trace=True)
                                 else:
-                                    strat2_reason = decision_state.get("human_reason", "Strategy 2 failed")
-                                    strat2_machine = decision_state.get("machine_state", {})
+                                    self.strategy_stats["Strategy 2"]["rejected"] += 1
                                     
-                                    signal, decision_state = self.signal_gen.check_vwap_band_breakout_signal(self.current_df, generate_trace=False)
-                                    if signal:
+                                    s3_sig, s3_state = self.signal_gen.check_vwap_band_breakout_signal(self.current_df, generate_trace=False)
+                                    if s3_sig:
+                                        triggered_strategy = "Strategy 3"
+                                        self.strategy_stats["Strategy 3"]["candidate"] += 1
                                         signal, decision_state = self.signal_gen.check_vwap_band_breakout_signal(self.current_df, generate_trace=True)
                                     else:
-                                        strat3_reason = decision_state.get("human_reason", "Strategy 3 failed")
+                                        self.strategy_stats["Strategy 3"]["rejected"] += 1
+                                        signal, decision_state = None, s3_state
+                                        strat1_reason = s1_state.get("human_reason", "Strategy 1 failed")
+                                        strat2_reason = s2_state.get("human_reason", "Strategy 2 failed")
+                                        strat3_reason = s3_state.get("human_reason", "Strategy 3 failed")
                                         decision_state["human_reason"] = f"S1: {strat1_reason} | S2: {strat2_reason} | S3: {strat3_reason}"
-                                        decision_state["machine_state"]["strategy_1_state"] = strat1_machine
-                                        decision_state["machine_state"]["strategy_2_state"] = strat2_machine
+                                        decision_state["machine_state"]["strategy_1_state"] = s1_state.get("machine_state", {})
+                                        decision_state["machine_state"]["strategy_2_state"] = s2_state.get("machine_state", {})
+                        
                         latest = self.current_df.iloc[-1]
                         
                         # Fix Gap 5: Enforce exact string format match with Canonical Collector for deterministic UUID5
@@ -489,14 +510,21 @@ class BrainService:
                         
                         decision_uuid = str(uuid.uuid4())
                         
+                        if signal and triggered_strategy:
+                            signal["strategy_name"] = triggered_strategy
+                            
                         # Determine the decision status, noting if we ignored a valid signal due to current state
                         if signal:
                             if self.trader.current_trade is not None:
                                 decision_status = "IGNORED_OPEN_TRADE"
                                 lifecycle_stage = DecisionLifecycle.FILTERED.value
+                                if triggered_strategy:
+                                    self.strategy_stats[triggered_strategy]["filtered"] += 1
                             elif self.trader.pending_setup is not None:
                                 decision_status = "IGNORED_SNIPER_MODE"
                                 lifecycle_stage = DecisionLifecycle.FILTERED.value
+                                if triggered_strategy:
+                                    self.strategy_stats[triggered_strategy]["filtered"] += 1
                             else:
                                 decision_status = "ACCEPTED"
                                 lifecycle_stage = DecisionLifecycle.CANDIDATE.value
@@ -631,9 +659,15 @@ class BrainService:
                         if not is_pending and is_trade:
                             pending_signal['signal_category'] = 'EXECUTED'
                             self.exec_pub.publish("EXEC.SIGNAL_RESOLVED", payload)
+                            strategy_name = pending_signal.get("strategy_name", "Strategy 1")
+                            if strategy_name in self.strategy_stats:
+                                self.strategy_stats[strategy_name]["executed"] += 1
                         elif not is_pending and not is_trade:
                             pending_signal['signal_category'] = 'REJECTED'
                             self.exec_pub.publish("EXEC.SIGNAL_RESOLVED", payload)
+                            strategy_name = pending_signal.get("strategy_name", "Strategy 1")
+                            if strategy_name in self.strategy_stats:
+                                self.strategy_stats[strategy_name]["expired"] += 1
                             
                         try:
                             self.strike_intelligence.register_signal(payload)
@@ -649,7 +683,8 @@ class BrainService:
                         "vwap": float(latest.get('vwap', 0)),
                         "ema": float(latest.get('ema_9', 0)),
                         "vfi": float(latest.get('vfi', 0)),
-                        "vfi_ema": float(latest.get('vfi_ema', 0))
+                        "vfi_ema": float(latest.get('vfi_ema', 0)),
+                        "strategy_stats": self.strategy_stats
                     }
                     self.exec_pub.publish("EXEC.TELEMETRY", telemetry)
                     
