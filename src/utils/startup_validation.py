@@ -2,7 +2,7 @@ import os
 import sys
 import socket
 import json
-from src.utils.file_utils import write_json_atomic
+from src.utils.file_utils import write_envelope_json_atomic
 import psutil
 from pathlib import Path
 from datetime import datetime
@@ -139,10 +139,10 @@ def run_startup_validation(base_dir: Path) -> dict:
     }
     
     # Save report
-    report_file = str(runtime_dir / "startup_validation.json")
+    report_file = str(runtime_dir / "platform_validation.json")
     try:
-        write_json_atomic(report_file, final_report)
+        write_envelope_json_atomic(report_file, final_report)
     except Exception as e:
-        print(f"Failed to write startup validation atomically: {e}")
+        print(f"Failed to write platform validation atomically: {e}")
         
     return final_report

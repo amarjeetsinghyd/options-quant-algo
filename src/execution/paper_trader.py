@@ -294,9 +294,9 @@ class PaperTrader:
         exch_seg = t['exch_seg']
         
         try:
-            # Check Option Price for TARGET
             res = self.api.ltpData(exch_seg, t['symbol'], token)
             current_opt_price = float(res['data']['ltp']) if (res and res.get('status')) else t['entry_price']
+            t['current_price'] = current_opt_price
             
             # 1. Check for Gamma Stall (Time-Based Abort)
             if time.time() - t.get('start_time', 0) >= 180:

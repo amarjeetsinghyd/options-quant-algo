@@ -3,6 +3,7 @@ import threading
 import sys
 import os
 import uuid
+import numpy as np
 from pathlib import Path
 os.environ["POLARS_IGNORE_TIMEZONE_PARSE_ERROR"] = "1"
 import pandas as pd
@@ -24,6 +25,8 @@ from src.ml_engine.gamma_event_collector import GammaEventCollector
 from src.research.strike_intelligence import StrikeIntelligenceModule
 from src.config.engineering_config import STRATEGY_VERSION
 from src.core.decision_lifecycle import DecisionLifecycle
+from src.core.market_data_cache import MarketDataCache
+from src.services.time_stop_research_service import TimeStopResearchService
 
 logger = get_logger("brain_service")
 
@@ -87,10 +90,51 @@ class BrainService:
         }
         
         self.subscribed_option = None
+        self.subscribed_options_set = set()
+        self.market_data_cache = MarketDataCache()
+        self.research_service = TimeStopResearchService(self.market_data_cache, exec_pub=self.exec_pub)
+        self.tick_seq_counter = 0
+        self.prev_ltp_cache = {}
+        self.logic_eval_times = []
+        self.feed_active_logged = False
+        
         self.tracked_options = {}
         self.last_historic_fetch = 0
         self.last_option_refresh = 0
         self.last_saved_indicator_minute = -1  # Tracks last minute we archived indicators
+
+    def publish_notification(self, event_type, severity, title, description, correlation_id="", strategy="--", instrument="--", premium=None, pnl=None):
+        try:
+            import uuid
+            from src.utils.provenance import get_provenance_metadata
+            try:
+                git_commit = get_provenance_metadata().get("git_commit", "unknown")[:7]
+            except Exception:
+                git_commit = "unknown"
+                
+            envelope = {
+                "schema_version": "1.0",
+                "generated_at": datetime.utcnow().isoformat() + "Z",
+                "engine_version": "1.1.0",
+                "git_commit": git_commit,
+                "event": {
+                    "notification_id": str(uuid.uuid4()),
+                    "event_type": event_type,
+                    "severity": severity,
+                    "title": title,
+                    "description": description,
+                    "timestamp": int(time.time() * 1000),
+                    "correlation_id": correlation_id,
+                    "strategy": strategy,
+                    "instrument": instrument,
+                    "premium": premium,
+                    "pnl": pnl,
+                    "status": "Generated"
+                }
+            }
+            self.exec_pub.publish("EXEC.EVENT", envelope)
+        except Exception as e:
+            logger.error(f"[BrainService] Failed to publish notification: {e}")
 
     def boot_sequence(self):
         logger.info("=== BOOT: Building Synthetic Volume Engine (this takes ~35 seconds) ===")
@@ -259,6 +303,94 @@ class BrainService:
             except Exception as e:
                 logger.error(f"Gamma collector error: {e}")
 
+        # 5. QOT Live Tape & Cache Updates
+        if ltp > 0:
+            ltp_val = float(ltp / 100)
+            symbol_name = message.get("symbol") or (self.anchor_symbol if token == self.anchor_token else (self.tracked_options[token]["symbol"] if token in self.tracked_options else token))
+            
+            self.tick_seq_counter += 1
+            
+            # Latency
+            exchange_time = message.get("exchange_timestamp") or message.get("exch_time")
+            latency_ms = 0
+            if exchange_time:
+                try:
+                    if isinstance(exchange_time, str):
+                        try:
+                            dt = datetime.strptime(exchange_time, "%Y-%m-%d %H:%M:%S")
+                            exchange_time = dt.timestamp()
+                        except:
+                            try:
+                                dt = datetime.strptime(exchange_time, "%d-%b-%Y %H:%M:%S")
+                                exchange_time = dt.timestamp()
+                            except:
+                                if exchange_time.replace('.','',1).isdigit():
+                                    exchange_time = float(exchange_time)
+                                else:
+                                    exchange_time = time.time()
+                    latency_ms = max(0, int((time.time() - float(exchange_time)) * 1000))
+                except Exception:
+                    pass
+                    
+            # Direction and Spread
+            tick_dir = "NEUTRAL"
+            best_bid = 0.0
+            best_ask = 0.0
+            if 'best_5_buy_data' in message and len(message['best_5_buy_data']) > 0:
+                best_bid = float(message['best_5_buy_data'][0].get('price', 0)) / 100
+            if 'best_5_sell_data' in message and len(message['best_5_sell_data']) > 0:
+                best_ask = float(message['best_5_sell_data'][0].get('price', 0)) / 100
+                
+            if best_ask > 0.0 and ltp_val >= best_ask:
+                tick_dir = "BUY"
+            elif best_bid > 0.0 and ltp_val <= best_bid:
+                tick_dir = "SELL"
+                
+            # Price change
+            price_change = 0.0
+            if symbol_name in self.prev_ltp_cache:
+                price_change = ltp_val - self.prev_ltp_cache[symbol_name]
+            self.prev_ltp_cache[symbol_name] = ltp_val
+            
+            # Update cache
+            self.market_data_cache.update_tick(
+                token=token,
+                symbol=symbol_name,
+                exchange=message.get("exchange", "NSE" if token == self.anchor_token else "NFO"),
+                ltp=ltp_val,
+                bid=best_bid,
+                ask=best_ask,
+                volume=ltq,
+                seq=self.tick_seq_counter,
+                latency=latency_ms,
+                direction=tick_dir
+            )
+            
+            # Publish EXEC.TICK
+            if not self.feed_active_logged and symbol_name == self.anchor_symbol:
+                self.publish_notification(
+                    event_type="FEED_RESTORED",
+                    severity="SUCCESS",
+                    title="Feed Restored",
+                    description=f"{symbol_name} Tick Stream Active",
+                    instrument=symbol_name
+                )
+                self.feed_active_logged = True
+            
+            self.exec_pub.publish("EXEC.TICK", {
+                "timestamp": int(time.time() * 1000),
+                "instrument": symbol_name,
+                "ltp": ltp_val,
+                "price_change": round(price_change, 2),
+                "delta_volume": ltq,
+                "tick_direction": tick_dir,
+                "bid": best_bid,
+                "ask": best_ask,
+                "spread": round(best_ask - best_bid, 2) if best_ask > best_bid else 0.0,
+                "tick_seq": self.tick_seq_counter,
+                "latency": latency_ms
+            })
+
         # 5. Order Flow / Delta Tracking for Active Option
         if self.subscribed_option == token and ltp > 0:
             live_opt_ltp = float(ltp / 100)
@@ -334,8 +466,8 @@ class BrainService:
             if is_market_open and self.live_ltp is not None:
                 now_ts = time.time()
                 
-                # Fetch recent candles every 10 seconds to ensure consistency with broker
-                if now_ts - self.last_historic_fetch >= 10:
+                # Fetch recent candles every 60 seconds to ensure consistency with broker (aligns with 1-min candle interval)
+                if now_ts - self.last_historic_fetch >= 60:
                     if not self._volume_fetch_thread or not self._volume_fetch_thread.is_alive():
                         self._volume_fetch_thread = threading.Thread(
                             target=self._background_volume_fetch, daemon=True
@@ -445,6 +577,8 @@ class BrainService:
                     pending_signal = self.trader.pending_setup.copy() if was_pending else None
                     was_trade = self.trader.current_trade is not None
                     
+                    t0 = time.time()
+                    
                     # ── GAP 1 FIX: ALWAYS EVALUATE SIGNALS DURING TRADING WINDOW ──
                     is_trading_window = (now.hour > 10 or (now.hour == 10 and now.minute >= 0)) and (now.hour < 15 or (now.hour == 15 and now.minute < 15))
                     is_stale = (now_ts - self._last_fetch_time) > 180  # 3 minutes stale
@@ -453,12 +587,14 @@ class BrainService:
                         if is_stale:
                             signal, decision_state = None, {
                                 "human_reason": f"Data stale by {int(now_ts - self._last_fetch_time)}s. Degraded mode.",
-                                "machine_state": {}
+                                "machine_state": {},
+                                "rule_evaluations": []
                             }
                         elif self.trader.cooldown_until and now < self.trader.cooldown_until:
                             signal, decision_state = None, {
                                 "human_reason": f"Active Cooldown until {self.trader.cooldown_until.strftime('%H:%M:%S')}",
-                                "machine_state": {}
+                                "machine_state": {},
+                                "rule_evaluations": []
                             }
                         else:
                             # Increment Observed counts
@@ -512,6 +648,14 @@ class BrainService:
                         
                         if signal and triggered_strategy:
                             signal["strategy_name"] = triggered_strategy
+                            self.publish_notification(
+                                event_type="CANDIDATE_CREATED",
+                                severity="INFO",
+                                title="Candidate Created",
+                                description=f"Candidate Created for {triggered_strategy}",
+                                correlation_id=decision_uuid[:8],
+                                strategy=triggered_strategy
+                            )
                             
                         # Determine the decision status, noting if we ignored a valid signal due to current state
                         if signal:
@@ -532,6 +676,12 @@ class BrainService:
                             decision_status = "REJECTED"
                             lifecycle_stage = DecisionLifecycle.OBSERVED.value
                         
+                        # Logic evaluation stopwatch end
+                        eval_ms = (time.time() - t0) * 1000.0
+                        self.logic_eval_times.append(eval_ms)
+                        if len(self.logic_eval_times) > 1000:
+                            self.logic_eval_times.pop(0)
+                        
                         # Build conditional trace payload (Level 0 vs Level 1)
                         if lifecycle_stage == DecisionLifecycle.OBSERVED.value:
                             # Level 0: Minimal observation row
@@ -545,6 +695,7 @@ class BrainService:
                                 "lifecycle_stage": lifecycle_stage,
                                 "decision_contract_version": "1.0.0",
                                 "strategy_version": STRATEGY_VERSION,
+                                "evaluation_time_ms": round(eval_ms, 2),
                                 "market_state": {
                                     "vfi": float(latest.get('vfi', 0)),
                                     "vwap": float(latest.get('vwap', 0)),
@@ -590,6 +741,7 @@ class BrainService:
                                 "dataset_schema_version": prov["dataset_schema_version"],
                                 "strategy_parameters": STRATEGY_CONSTANTS,
                                 "rule_evaluations": decision_state.get("rule_evaluations", []),
+                                "evaluation_time_ms": round(eval_ms, 2),
                                 "market_state": {
                                     "vfi": float(latest.get('vfi', 0)),
                                     "vwap": float(latest.get('vwap', 0)),
@@ -616,6 +768,16 @@ class BrainService:
                             self.trader.register_setup(signal)
                             # Publish setup to exec port for UI
                             self.exec_pub.publish("EXEC.SETUP", signal)
+                            self.publish_notification(
+                                event_type="SETUP_PUBLISHED",
+                                severity="SUCCESS",
+                                title="Setup Published",
+                                description=f"BUY {signal.get('type')} Published for {signal['symbol']} @ limit price ₹{signal.get('limit_price', 0.0)}",
+                                correlation_id=decision_uuid[:8],
+                                strategy=signal.get('strategy_name', '--'),
+                                instrument=signal.get('symbol', '--'),
+                                premium=signal.get('limit_price')
+                            )
                             
                     # ── MANAGE ACTIVE TRADES / SETUPS ──
                     if self.trader.pending_setup is not None:
@@ -674,17 +836,136 @@ class BrainService:
                         except Exception as e:
                             logger.error(f"Strike Intelligence error: {e}")
                             
+                    # Time stop research entry/exit transitions
+                    if not was_trade and self.trader.current_trade is not None:
+                        # Sniper trade entered!
+                        trade = self.trader.current_trade
+                        self.research_service.register_trade_entry(trade)
+                        self.publish_notification(
+                            event_type="BUY_EXECUTED",
+                            severity="SUCCESS",
+                            title="BUY Executed",
+                            description=f"Paper Trade Executed: {trade.get('symbol')} // BUY @ limit price ₹{trade.get('entry_price')}",
+                            correlation_id=(trade.get("decision_uuid") or '')[:8],
+                            strategy=trade.get('strategy', 'Strategy 1'),
+                            instrument=trade.get('symbol', '--'),
+                            premium=trade.get('entry_price')
+                        )
+                    elif was_trade and self.trader.current_trade is None:
+                        # Trade exited!
+                        if len(self.trader.history_list) > 0:
+                            last_trade = self.trader.history_list[-1]
+                            self.research_service.register_trade_exit(
+                                last_trade.get("decision_uuid") or last_trade.get("id"),
+                                last_trade.get("exit_price"),
+                                last_trade.get("reason"),
+                                last_trade.get("net_pl")
+                            )
+                            
+                            reason_str = last_trade.get("reason", "")
+                            if "target" in reason_str.lower():
+                                evt_t = "TARGET_HIT"
+                                evt_title = "Target Hit"
+                                evt_sev = "SUCCESS"
+                            elif "stop loss" in reason_str.lower() or "sl" in reason_str.lower() or "stop" in reason_str.lower():
+                                evt_t = "STOP_LOSS"
+                                evt_title = "Stop Loss"
+                                evt_sev = "ERROR"
+                            elif "stall" in reason_str.lower() or "time stop" in reason_str.lower():
+                                evt_t = "TIME_STOP"
+                                evt_title = "Time Stop"
+                                evt_sev = "WARNING"
+                            else:
+                                evt_t = "TRADE_CLOSED"
+                                evt_title = "Paper Trade Closed"
+                                evt_sev = "INFO"
+                                
+                            self.publish_notification(
+                                event_type=evt_t,
+                                severity=evt_sev,
+                                title=evt_title,
+                                description=f"Trade Closed ({reason_str}): Exit price ₹{last_trade.get('exit_price')} // Net P&L ₹{last_trade.get('net_pl'):.2f}",
+                                correlation_id=(last_trade.get("decision_uuid") or '')[:8],
+                                strategy=last_trade.get('strategy', 'Strategy 1'),
+                                instrument=last_trade.get('symbol', '--'),
+                                premium=last_trade.get('exit_price'),
+                                pnl=last_trade.get('net_pl')
+                            )
+                            
+                            self.publish_notification(
+                                event_type="OBSERVATION_STARTED",
+                                severity="RESEARCH",
+                                title="Observation Started",
+                                description=f"Post-Exit Time-Stop Observation Started for {last_trade.get('symbol')}",
+                                correlation_id=(last_trade.get("decision_uuid") or '')[:8],
+                                strategy=last_trade.get('strategy', 'Strategy 1'),
+                                instrument=last_trade.get('symbol', '--')
+                            )
+
+                    # Compute Configurable Market Personality Score
+                    from src.config.market_personality_config import PERSONALITY_WEIGHTS
+                    latest_bar = self.current_df.iloc[-1]
+                    p_score = PERSONALITY_WEIGHTS.get("base_score", 50)
+                    price_val = float(latest_bar.get('close', 0.0))
+                    vwap_val = float(latest_bar.get('vwap', 0.0))
+                    if price_val > vwap_val:
+                        p_score += PERSONALITY_WEIGHTS.get("vwap_alignment", 15)
+                    else:
+                        p_score -= PERSONALITY_WEIGHTS.get("vwap_alignment", 15)
+                    
+                    ema_val = float(latest_bar.get('ema_9', 0.0))
+                    if ema_val > vwap_val:
+                        p_score += PERSONALITY_WEIGHTS.get("ema_crossover", 15)
+                    else:
+                        p_score -= PERSONALITY_WEIGHTS.get("ema_crossover", 15)
+                        
+                    vfi_val = float(latest_bar.get('vfi', 0.0))
+                    if vfi_val > 0.0:
+                        p_score += PERSONALITY_WEIGHTS.get("vfi_positive", 10)
+                    else:
+                        p_score -= PERSONALITY_WEIGHTS.get("vfi_positive", 10)
+                        
+                    vfi_ema_val = float(latest_bar.get('vfi_ema', 0.0))
+                    if vfi_ema_val > 0.0:
+                        p_score += PERSONALITY_WEIGHTS.get("vfi_ema_positive", 10)
+                    else:
+                        p_score -= PERSONALITY_WEIGHTS.get("vfi_ema_positive", 10)
+                        
+                    regime_val = int(latest_bar.get('market_regime', 0))
+                    if regime_val == 1:
+                        p_score += PERSONALITY_WEIGHTS.get("bullish_regime", 10)
+                    elif regime_val == -1:
+                        p_score -= PERSONALITY_WEIGHTS.get("bullish_regime", 10)
+                    p_score = max(0, min(100, p_score))
+
+                    # Logic check latency stats
+                    eval_avg = sum(self.logic_eval_times) / len(self.logic_eval_times) if self.logic_eval_times else 0.0
+                    eval_max = max(self.logic_eval_times) if self.logic_eval_times else 0.0
+                    eval_min = min(self.logic_eval_times) if self.logic_eval_times else 0.0
+                    eval_95th = float(np.percentile(self.logic_eval_times, 95)) if self.logic_eval_times else 0.0
+
                     # Publish Telemetry for UI
-                    latest = self.current_df.iloc[-1]
                     telemetry = {
                         "symbol": self.anchor_symbol,
                         "ltp": self.live_ltp,
                         "volume": sum(self.current_minute_volume_tracker.values()),
-                        "vwap": float(latest.get('vwap', 0)),
-                        "ema": float(latest.get('ema_9', 0)),
-                        "vfi": float(latest.get('vfi', 0)),
-                        "vfi_ema": float(latest.get('vfi_ema', 0)),
-                        "strategy_stats": self.strategy_stats
+                        "vwap": float(latest_bar.get('vwap', 0)),
+                        "ema": float(latest_bar.get('ema_9', 0)),
+                        "vfi": float(latest_bar.get('vfi', 0)),
+                        "vfi_ema": float(latest_bar.get('vfi_ema', 0)),
+                        "market_regime": regime_val,
+                        "compression": float(latest_bar.get('compression', 0.0)),
+                        "atr_expansion": float(latest_bar.get('atr_expansion', 1.0)),
+                        "strategy_stats": self.strategy_stats,
+                        "market_personality_score": p_score,
+                        "tick_seq_counter": self.tick_seq_counter,
+                        "research_queue_health": self.research_service.get_queue_health(),
+                        "latency_metrics": {
+                            "min_eval_ms": round(eval_min, 2),
+                            "avg_eval_ms": round(eval_avg, 2),
+                            "max_eval_ms": round(eval_max, 2),
+                            "pct95_eval_ms": round(eval_95th, 2)
+                        }
                     }
                     self.exec_pub.publish("EXEC.TELEMETRY", telemetry)
                     
@@ -699,23 +980,39 @@ class BrainService:
                         self.exec_pub.publish("EXEC.CHART_SYNC", chart_payload)
                     
                     # Manage Option Subscription for Order Flow
-                    opt_token = None
+                    opt_tokens = []
                     if self.trader.current_trade:
-                        opt_token = self.trader.current_trade['token']
+                        opt_tokens.append(self.trader.current_trade['token'])
                         self.exec_pub.publish("EXEC.ACTIVE_TRADE", self.trader.current_trade)
-                    elif self.trader.pending_setup:
-                        opt_token = self.trader.pending_setup.get('candidate_token')
-                        
-                    if opt_token and self.subscribed_option != opt_token:
-                        self.cmd_pub.publish("CMD.SUBSCRIBE", {"tokens": [opt_token], "exchange": "NFO"})
-                        self.feed_sub.socket.setsockopt_string(zmq.SUBSCRIBE, f"TICK.{opt_token}")
-                        self.subscribed_option = opt_token
+                    if self.trader.pending_setup:
+                        opt_tokens.append(self.trader.pending_setup.get('candidate_token'))
+                    opt_tokens.extend(self.research_service.get_observed_tokens())
+                    
+                    import zmq
+                    # Ensure we subscribe to any new options tokens we need to observe
+                    for t in opt_tokens:
+                        if t and t not in self.subscribed_options_set:
+                            self.cmd_pub.publish("CMD.SUBSCRIBE", {"tokens": [t], "exchange": "NFO"})
+                            try:
+                                self.feed_sub.socket.setsockopt_string(zmq.SUBSCRIBE, f"TICK.{t}")
+                            except Exception:
+                                pass
+                            self.subscribed_options_set.add(t)
 
             time.sleep(2)
 
     def start(self):
         logger.info("=== STARTING BRAIN SERVICE ===")
         self.boot_sequence()
+        self.research_service.start()
+        
+        # Publish start event
+        self.publish_notification(
+            event_type="BRAIN_RESTARTED",
+            severity="SYSTEM",
+            title="Brain Restarted",
+            description="Brain Service Started"
+        )
         
         # Start logic loop
         logic_thread = threading.Thread(target=self.execute_logic_loop, daemon=True)

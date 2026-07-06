@@ -3,20 +3,28 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Quant Console 2.0 — Operations & Research</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=2.0">
+    <title>QOT v1.1.0 — Quant Operations Terminal</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=2.2">
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
     <script type="module" src="https://unpkg.com/ionicons@7.1.0/dist/ionicons/ionicons.esm.js"></script>
     <script nomodule src="https://unpkg.com/ionicons@7.1.0/dist/ionicons/ionicons.js"></script>
 </head>
 <body>
     <div class="app-wrapper">
-        <!-- Compact Bloomberg Header -->
+        <!-- Persistent Top Operator Banner -->
+        <div class="operator-banner">
+            <div>QUANT OPERATIONS TERMINAL // OBSERVATION PHASE // <span class="badge-frozen">RESEARCH EPOCH 1</span> // ARCHITECTURE FROZEN // EXECUTION MODE: <span class="badge-paper">PAPER TRADING</span></div>
+            <div style="font-family: var(--font-mono); font-size: 10px;">
+                ARCHITECTURE: <span class="badge-frozen">FROZEN</span> // UI: v1.1.0 // Engine: <span id="hdr-engine-ver">v1.1.0</span> // Status: <span id="hdr-compat-status" style="color: var(--success); font-weight: bold;">✓ Compatible</span> // Git: 5256d6e
+            </div>
+        </div>
+
+        <!-- QOT Header -->
         <header class="top-nav">
             <div class="nav-left">
                 <div class="nav-brand">
                     <ion-icon name="terminal" class="brand-icon"></ion-icon>
-                    <h1>QUANT // <span>OPS_CONSOLE_2.0</span></h1>
+                    <h1>QOT // <span>OPERATIONS_TERMINAL</span></h1>
                 </div>
                 <!-- Mode Selector -->
                 <div class="mode-selector">
@@ -67,39 +75,364 @@
             
             <!-- LIVE VIEW MODE WRAPPER -->
             <div class="contents-group col-span-3 grid-layout" id="live-mode-group">
-                <!-- SECTION 1: Engine Overview -->
-                <div class="card flat-panel">
-                    <div class="card-header">
-                        <h2>[01] ENGINE OVERVIEW</h2>
+                <!-- PANEL 1: Live Tape -->
+                <div class="card flat-panel col-span-3" id="live-tape-panel">
+                    <div class="card-header flex-row-between">
+                        <h2>[01] LIVE TAPE</h2>
+                        <span class="lbl text-muted" id="tape-pause-status">F9: PAUSE ACTIVE TAPE</span>
                     </div>
-                    <div class="overview-list">
-                        <div class="overview-item">
-                            <span>Status</span>
-                            <span id="val-engine-status" class="font-bold text-success">ACTIVE</span>
-                        </div>
-                        <div class="overview-item">
-                            <span>Lifecycle State</span>
-                            <span id="val-lifecycle-state" class="highlight font-bold">--</span>
-                        </div>
-                        <div class="overview-item">
-                            <span>Uptime</span>
-                            <span id="val-engine-uptime" class="mono-font">0s</span>
-                        </div>
-                        <div class="overview-item">
-                            <span>Platform Version</span>
-                            <span id="val-platform-ver" class="mono-font">1.0.0</span>
-                        </div>
-                        <div class="overview-item">
-                            <span>Engine PID</span>
-                            <span id="val-engine-pid" class="mono-font">--</span>
+                    <div class="table-container" style="max-height: 180px; overflow-y: auto;">
+                        <table class="data-table" style="font-size: 11px;">
+                            <thead>
+                                <tr>
+                                    <th>Timestamp (ms)</th>
+                                    <th>Instrument</th>
+                                    <th>LTP</th>
+                                    <th>Dir</th>
+                                    <th>Δ Price</th>
+                                    <th>Δ Volume</th>
+                                    <th>Bid</th>
+                                    <th>Ask</th>
+                                    <th>Spread</th>
+                                    <th>Latency (ms)</th>
+                                    <th>Age (ms)</th>
+                                    <th>Sequence</th>
+                                    <th>SEQ GAP</th>
+                                    <th>Feed Delay</th>
+                                </tr>
+                            </thead>
+                            <tbody id="live-tape-body" class="mono-font">
+                                <tr>
+                                    <td colspan="14" class="text-muted text-center">Waiting for market feed connection...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- PANEL 2b: Push Notifications & Filters -->
+                <div class="card flat-panel col-span-3" id="push-notifications-panel">
+                    <div class="card-header flex-row-between">
+                        <h2>[02b] BROWSER PUSH NOTIFICATIONS & SILENT HOURS</h2>
+                        <button class="action-btn" id="btn-request-push" onclick="requestPushPermission()" style="font-size:10px; padding: 2px 6px;">REQUEST PERMISSION</button>
+                    </div>
+                    <div style="padding: 10px; display: flex; flex-wrap: wrap; gap: 15px; font-size: 11px; align-items: center; border-top: 1px solid var(--border);">
+                        <div>STATUS: <strong id="push-status-lbl" class="text-warning">UNKNOWN</strong></div>
+                        <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                            <label><input type="checkbox" id="chk-notify-trades" onchange="saveNotificationFilters()"> Trades Only</label>
+                            <label><input type="checkbox" id="chk-notify-all" onchange="saveNotificationFilters()"> Notify Everything</label>
+                            <label><input type="checkbox" id="chk-mute-research" onchange="saveNotificationFilters()"> Mute Research</label>
+                            <label><input type="checkbox" id="chk-mute-audit" onchange="saveNotificationFilters()"> Mute Audit</label>
+                            <label><input type="checkbox" id="chk-mute-backup" onchange="saveNotificationFilters()"> Mute Backup</label>
+                            <label><input type="checkbox" id="chk-mute-feed" onchange="saveNotificationFilters()"> Mute Feed Recovery</label>
                         </div>
                     </div>
                 </div>
 
-                <!-- SECTION 2: Service Monitor -->
-                <div class="card flat-panel col-span-2">
+                <!-- PANEL 2: System Event Recorder -->
+                <div class="card flat-panel col-span-3" id="system-events-panel">
                     <div class="card-header">
-                        <h2>[02] SERVICE MONITOR</h2>
+                        <h2>[02] SYSTEM EVENT RECORDER (UNIFIED TIMELINE)</h2>
+                    </div>
+                    <div class="table-container" style="max-height: 160px; overflow-y: auto;">
+                        <table class="data-table" style="font-size: 11px;">
+                            <thead>
+                                <tr>
+                                    <th style="width: 140px;">Timestamp</th>
+                                    <th style="width: 100px;">Source</th>
+                                    <th style="width: 100px;">Severity</th>
+                                    <th>Event Description</th>
+                                    <th style="width: 100px;">Correlation ID</th>
+                                </tr>
+                            </thead>
+                            <tbody id="system-events-body" class="mono-font">
+                                <tr>
+                                    <td colspan="5" class="text-muted text-center">Waiting for ZMQ platform events...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- PANEL 3: Decision Console -->
+                <div class="card flat-panel col-span-2" id="decision-console-panel">
+                    <div class="card-header">
+                        <h2>[03] DECISION CONSOLE (BRAIN PIPELINE)</h2>
+                    </div>
+                    <div class="table-container" style="max-height: 240px; overflow-y: auto;">
+                        <table class="data-table" style="font-size: 11px;">
+                            <thead>
+                                <tr>
+                                    <th>Timestamp</th>
+                                    <th>Correlation ID</th>
+                                    <th>Action</th>
+                                    <th>Status</th>
+                                    <th>Processing (Fastest/Avg/95%/Slowest)</th>
+                                    <th>Rule Evaluations</th>
+                                </tr>
+                            </thead>
+                            <tbody id="decision-console-body" class="mono-font">
+                                <tr>
+                                    <td colspan="6" class="text-muted text-center">No decisions evaluated yet today...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- PANEL 4: Execution Console -->
+                <div class="card flat-panel col-span-1" id="execution-console-panel">
+                    <div class="card-header">
+                        <h2>[04] EXECUTION CONSOLE</h2>
+                    </div>
+                    <div class="table-container" style="max-height: 240px; overflow-y: auto;">
+                        <table class="data-table" style="font-size: 11px;">
+                            <thead>
+                                <tr>
+                                    <th>Time</th>
+                                    <th>Correlation ID</th>
+                                    <th>Event Description</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="execution-console-body" class="mono-font">
+                                <tr>
+                                    <td colspan="4" class="text-muted text-center">No execution events triggered yet...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- PANEL 4b: Active Position Monitor -->
+                <div class="card flat-panel col-span-1" id="active-position-panel">
+                    <div class="card-header">
+                        <h2>[04b] ACTIVE POSITION MONITOR</h2>
+                    </div>
+                    <div class="overview-list" id="active-position-container" style="padding: 10px 0;">
+                        <div class="text-center text-muted" style="padding: 15px; font-family: var(--font-mono); font-size: 11px;">
+                            NO ACTIVE POSITION
+                        </div>
+                    </div>
+                </div>
+
+                <!-- PANEL 5: Feed Health Console & Sparkline -->
+                <div class="card flat-panel col-span-1" id="feed-health-panel">
+                    <div class="card-header">
+                        <h2>[05] FEED HEALTH & CLOCK SYNC</h2>
+                    </div>
+                    <div class="overview-list" id="feed-health-list">
+                        <div class="overview-item">
+                            <span>Heartbeat Status</span>
+                            <strong id="feed-heartbeat">Healthy</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Feed Quality</span>
+                            <strong id="feed-quality" class="text-success">100.0%</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Local Client Time</span>
+                            <strong id="clock-local" class="mono-font">--:--:--</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Exchange Time</span>
+                            <strong id="clock-exchange" class="mono-font">--:--:--</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Clock Drift</span>
+                            <strong id="clock-drift" class="mono-font">0 ms</strong>
+                        </div>
+                        <div class="overview-item flex-col-align-start" style="margin-top: 5px;">
+                            <span>Tick Rate Sparkline (Last 60s)</span>
+                            <small id="tick-rate-sparkline" class="mono-font text-muted" style="font-size:12px; letter-spacing:1px; margin-top:2px;">▖▖▖▖▖▖▖▖▖▖</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- PANEL 6: Strategy Funnel Console -->
+                <div class="card flat-panel col-span-1" id="strategy-funnel-panel">
+                    <div class="card-header">
+                        <h2>[06] STRATEGY FUNNEL & PIPELINE</h2>
+                    </div>
+                    <div class="overview-list" style="padding-top: 2px;">
+                        <div class="overview-item" style="border-bottom: none; padding-bottom: 2px;">
+                            <span>Observed</span>
+                            <strong id="funnel-val-observed">0</strong>
+                        </div>
+                        <div class="funnel-progress-bar" id="funnel-bar-observed">░░░░░░░░░░ 0.0%</div>
+                        
+                        <div class="overview-item" style="border-bottom: none; padding-bottom: 2px; margin-top: 4px;">
+                            <span>Candidates</span>
+                            <strong id="funnel-val-candidates">0</strong>
+                        </div>
+                        <div class="funnel-progress-bar" id="funnel-bar-candidates">░░░░░░░░░░ 0.0%</div>
+                        
+                        <div class="overview-item" style="border-bottom: none; padding-bottom: 2px; margin-top: 4px;">
+                            <span>Filtered</span>
+                            <strong id="funnel-val-filtered">0</strong>
+                        </div>
+                        <div class="funnel-progress-bar" id="funnel-bar-filtered">░░░░░░░░░░ 0.0%</div>
+                        
+                        <div class="overview-item" style="border-bottom: none; padding-bottom: 2px; margin-top: 4px;">
+                            <span>Executed</span>
+                            <strong id="funnel-val-executed">0</strong>
+                        </div>
+                        <div class="funnel-progress-bar" id="funnel-bar-executed">░░░░░░░░░░ 0.0%</div>
+                    </div>
+                </div>
+
+                <!-- PANEL 7: Live Indicator Monitor -->
+                <div class="card flat-panel col-span-1" id="live-indicator-panel">
+                    <div class="card-header">
+                        <h2>[07] LIVE INDICATOR MONITOR</h2>
+                    </div>
+                    <div class="overview-list">
+                        <div class="overview-item">
+                            <span>IndexSymbol</span>
+                            <strong id="mstate-symbol">--</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>VWAP</span>
+                            <strong id="mstate-vwap">--</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>EMA9</span>
+                            <strong id="mstate-ema">--</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>ATR (42.6)</span>
+                            <strong id="mstate-atr">--</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Compression</span>
+                            <strong id="mstate-compression">--</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>VFI / VFI EMA</span>
+                            <strong id="mstate-vfi-ema">--</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Market Regime</span>
+                            <strong id="mstate-regime">--</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Market Personality</span>
+                            <strong id="mstate-personality-score" class="highlight-gold">--</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- PANEL 8: Build Information Panel -->
+                <div class="card flat-panel col-span-1" id="build-info-panel">
+                    <div class="card-header">
+                        <h2>[08] BUILD INFORMATION</h2>
+                    </div>
+                    <div class="overview-list" id="build-info-list">
+                        <div class="overview-item">
+                            <span>Engine Version</span>
+                            <strong id="build-engine">v1.1.0</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Git Commit SHA</span>
+                            <strong id="build-git" class="mono-font">5256d6e</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Broker Selection</span>
+                            <strong id="build-broker">Angel One</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Research Epoch</span>
+                            <strong id="build-epoch">1</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Schema Version</span>
+                            <strong id="build-schema">2.0</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>OS Platform</span>
+                            <strong id="build-platform">Windows</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Python Interpreter</span>
+                            <strong id="build-python">3.13</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- PANEL 9: Memory Allocation Breakdown -->
+                <div class="card flat-panel col-span-1" id="process-memory-panel">
+                    <div class="card-header">
+                        <h2>[09] PROCESS MEMORY ALLOCATION</h2>
+                    </div>
+                    <div class="overview-list" id="memory-breakdown-list">
+                        <div class="overview-item">
+                            <span>Feed Service</span>
+                            <strong id="mem-feed">0.0 MB</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Brain Service</span>
+                            <strong id="mem-brain">0.0 MB</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Research Collector</span>
+                            <strong id="mem-research">0.0 MB</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Dashboard Flask</span>
+                            <strong id="mem-dashboard">0.0 MB</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Total Platform</span>
+                            <strong id="mem-total" class="highlight-gold">0.0 MB</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- PANEL 10: Research Progress & Health -->
+                <div class="card flat-panel col-span-1" id="research-queue-panel">
+                    <div class="card-header">
+                        <h2>[10] RESEARCH QUEUE HEALTH</h2>
+                    </div>
+                    <div class="overview-list">
+                        <div class="overview-item">
+                            <span>Research Epoch</span>
+                            <strong>Epoch 1</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Progress (Day)</span>
+                            <strong id="ts-epoch-day">Day --/30</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Parquet Samples</span>
+                            <strong id="ts-parquet-samples">0</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Target Baseline</span>
+                            <strong>1000</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Observing (Active)</span>
+                            <strong id="ts-observing" class="highlight-gold">0</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Waiting (Exits)</span>
+                            <strong id="ts-waiting" class="text-warning">0</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Completed Today</span>
+                            <strong id="ts-completed" class="text-success">0</strong>
+                        </div>
+                        <div class="overview-item">
+                            <span>Failed Tasks</span>
+                            <strong id="ts-failed" class="text-error">0</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- PANEL 11: Service Health heartbeat tree -->
+                <div class="card flat-panel col-span-2" id="heartbeat-tree-panel">
+                    <div class="card-header">
+                        <h2>[11] RUNTIME STATUS (MICROSERVICE HEARTBEAT TREE)</h2>
                     </div>
                     <div class="table-container">
                         <table class="data-table">
@@ -116,144 +449,58 @@
                                 </tr>
                             </thead>
                             <tbody id="service-table-body">
-                                <!-- Dynamic rows -->
+                                <!-- Dynamic service statuses -->
                             </tbody>
                         </table>
                     </div>
                 </div>
 
-                <!-- SECTION 3: Runtime Performance -->
-                <div class="card flat-panel">
+                <!-- PANEL 12: Minute Engine Timeline -->
+                <div class="card flat-panel col-span-1" id="minute-timeline-panel">
                     <div class="card-header">
-                        <h2>[03] RUNTIME PERFORMANCE</h2>
+                        <h2>[12] MINUTE ENGINE TIMELINE</h2>
                     </div>
-                    <div class="perf-stats-grid">
-                        <div class="perf-metric">
-                            <span class="lbl">System CPU</span>
-                            <span class="val" id="perf-cpu-sys">0.0%</span>
-                        </div>
-                        <div class="perf-metric">
-                            <span class="lbl">Platform CPU</span>
-                            <span class="val highlight" id="perf-cpu-plat">0.0%</span>
-                        </div>
-                        <div class="perf-metric">
-                            <span class="lbl">System RAM</span>
-                            <span class="val" id="perf-ram-total">0.0%</span>
-                        </div>
-                        <div class="perf-metric">
-                            <span class="lbl">Platform Threads</span>
-                            <span class="val" id="perf-threads">0</span>
-                        </div>
-                        <div class="perf-metric">
-                            <span class="lbl">Peak CPU (Sys)</span>
-                            <span class="val" id="perf-cpu-peak">0.0%</span>
-                        </div>
-                        <div class="perf-metric">
-                            <span class="lbl">Peak RAM</span>
-                            <span class="val" id="perf-ram-peak">0.0%</span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- SECTION 4: Decision Funnel -->
-                <div class="card flat-panel">
-                    <div class="card-header">
-                        <h2>[04] DECISION FUNNEL</h2>
-                    </div>
-                    <div class="funnel-container">
-                        <div class="funnel-stage" id="funnel-observed">
-                            <span class="stage-name">OBSERVED</span>
-                            <span class="stage-val">0</span>
-                            <span class="stage-meta">100%</span>
-                        </div>
-                        <div class="funnel-arrow"><ion-icon name="chevron-down-outline"></ion-icon></div>
-                        <div class="funnel-stage" id="funnel-candidate">
-                            <span class="stage-name">CANDIDATE</span>
-                            <span class="stage-val">0</span>
-                            <span class="stage-meta" id="pct-candidate">0.0%</span>
-                        </div>
-                        <div class="funnel-arrow"><ion-icon name="chevron-down-outline"></ion-icon></div>
-                        <div class="funnel-stage" id="funnel-filtered">
-                            <span class="stage-name">FILTERED</span>
-                            <span class="stage-val">0</span>
-                            <span class="stage-meta" id="pct-filtered">0.0%</span>
-                        </div>
-                        <div class="funnel-arrow"><ion-icon name="chevron-down-outline"></ion-icon></div>
-                        <div class="funnel-stage" id="funnel-sniper">
-                            <span class="stage-name">SNIPER</span>
-                            <span class="stage-val">0</span>
-                            <span class="stage-meta" id="pct-sniper">0.0%</span>
-                        </div>
-                        <div class="funnel-arrow"><ion-icon name="chevron-down-outline"></ion-icon></div>
-                        <div class="funnel-stage" id="funnel-executed">
-                            <span class="stage-name">EXECUTED</span>
-                            <span class="stage-val">0</span>
-                            <span class="stage-meta" id="pct-executed">0.0%</span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- SECTION 5: Strategy Activity -->
-                <div class="card flat-panel">
-                    <div class="card-header">
-                        <h2>[05] STRATEGY ACTIVITY</h2>
-                    </div>
-                    <div class="overview-list">
-                        <div class="overview-item">
-                            <span>Market Regime</span>
-                            <span id="val-market-regime">--</span>
-                        </div>
-                        <div class="overview-item">
-                            <span>Anchor Token</span>
-                            <span id="val-anchor-symbol" class="mono-font">--</span>
-                        </div>
-                        <div class="overview-item">
-                            <span>Last Target</span>
-                            <span id="val-last-signal" class="font-bold">NONE</span>
-                        </div>
-                        <div class="overview-item">
-                            <span>Active Setup</span>
-                            <span id="val-latest-action">NONE</span>
-                        </div>
-                        <div class="overview-item flex-col-align-start">
-                            <span>Last Evaluation Rejection</span>
-                            <small id="val-last-rejection" class="text-warning mono-font" style="word-break: break-all;">--</small>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- SECTION 6: Dataset Health -->
-                <div class="card flat-panel col-span-2" id="sec-dataset-health">
-                    <div class="card-header">
-                        <h2>[06] DATASET HEALTH (ADAPTIVE AVERAGES)</h2>
-                    </div>
-                    <div class="table-container">
-                        <table class="data-table">
+                    <div class="table-container" style="max-height: 180px; overflow-y: auto;">
+                        <table class="data-table" style="font-size: 10px;">
                             <thead>
                                 <tr>
-                                    <th>Dataset Name</th>
-                                    <th>Size on Disk</th>
-                                    <th>Today's Rows</th>
-                                    <th>Expected Rows (Avg)</th>
-                                    <th>Missing %</th>
-                                    <th>Status</th>
-                                    <th>Last Flush</th>
+                                    <th>Minute</th>
+                                    <th>Tick Volume</th>
+                                    <th>Signals</th>
+                                    <th>Trades</th>
                                 </tr>
                             </thead>
-                            <tbody id="dataset-table-body">
-                                <!-- Dynamic rows -->
+                            <tbody id="minute-timeline-body" class="mono-font">
+                                <tr>
+                                    <td colspan="4" class="text-muted text-center">No minute ticks accumulated yet...</td>
+                                </tr>
                             </tbody>
                         </table>
                     </div>
                 </div>
 
-                <!-- SECTION 7: Runtime Validation -->
-                <div class="card flat-panel" id="sec-runtime-val">
+                <!-- PANEL 13: Connection Monitor -->
+                <div class="card flat-panel col-span-3" id="connection-monitor-panel">
                     <div class="card-header">
-                        <h2>[07] CONTINUOUS RUNTIME VALIDATION</h2>
+                        <h2>[13] ACTIVE SUB-SUBNET OPERATORS (REMOTE CONNECTIONS)</h2>
                     </div>
-                    <div class="overview-list" id="runtime-checklist">
-                        <!-- Dynamic list -->
+                    <div class="table-container" style="max-height: 150px; overflow-y: auto;">
+                        <table class="data-table" style="font-size: 11px;">
+                            <thead>
+                                <tr>
+                                    <th>Operator IP</th>
+                                    <th>Device Class</th>
+                                    <th>Browser Agent</th>
+                                    <th>Connection Established</th>
+                                    <th>Last Telemetry Sync</th>
+                                </tr>
+                            </thead>
+                            <tbody id="connection-monitor-body" class="mono-font">
+                                <tr>
+                                    <td colspan="5" class="text-muted text-center">No remote operators connected...</td>
+                                </tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>
@@ -261,7 +508,7 @@
             <!-- RESEARCH VIEW MODE WRAPPER -->
             <div class="contents-group col-span-3 grid-layout" id="research-mode-group" style="display: none;">
                 <!-- EOD SESSION SUMMARIES -->
-                <div class="card flat-panel col-span-2">
+                <div class="card flat-panel col-span-2" id="research-summaries-panel">
                     <div class="card-header flex-row-between">
                         <h2>[R1] HISTORICAL SESSION SUMMARIES</h2>
                         <div class="summary-tab-buttons">
@@ -292,7 +539,7 @@
                 </div>
 
                 <!-- METADATA & DATA QUALITY -->
-                <div class="card flat-panel">
+                <div class="card flat-panel" id="data-quality-audit-panel">
                     <div class="card-header">
                         <h2>[R2] DATA QUALITY AUDIT (LATEST EOD)</h2>
                     </div>
@@ -329,7 +576,7 @@
                 </div>
 
                 <!-- RESEARCH PERFORMANCE METRICS -->
-                <div class="card flat-panel">
+                <div class="card flat-panel" id="research-portfolio-panel">
                     <div class="card-header">
                         <h2>[R3] RESEARCH PORTFOLIO METRICS</h2>
                     </div>
@@ -358,7 +605,7 @@
                 </div>
 
                 <!-- METADATA PROVENANCE SUMMARY -->
-                <div class="card flat-panel col-span-2">
+                <div class="card flat-panel col-span-2" id="research-provenance-panel">
                     <div class="card-header">
                         <h2>[R4] LATEST SUMMARY PROVENANCE METADATA</h2>
                     </div>
@@ -391,10 +638,35 @@
                 </div>
             </div>
 
-            <!-- SECTION 8: Strategy Level Statistics (Dense table) -->
-            <div class="card flat-panel col-span-3">
+            <!-- SECTION: Dataset Health (Adaptive Averages) -->
+            <div class="card flat-panel col-span-3" id="sec-dataset-health">
                 <div class="card-header">
-                    <h2>[08] STRATEGY LEVEL STATISTICS</h2>
+                    <h2>[D1] DATASET HEALTH (ADAPTIVE AVERAGES)</h2>
+                </div>
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Dataset Name</th>
+                                <th>Size on Disk</th>
+                                <th>Today's Rows</th>
+                                <th>Expected Rows (Avg)</th>
+                                <th>Missing %</th>
+                                <th>Status</th>
+                                <th>Last Flush</th>
+                            </tr>
+                        </thead>
+                        <tbody id="dataset-table-body">
+                            <!-- Dynamic rows -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- SECTION: Strategy Level Statistics (Dense table) -->
+            <div class="card flat-panel col-span-3" id="strategy-stats-panel">
+                <div class="card-header">
+                    <h2>[S1] STRATEGY LEVEL STATISTICS</h2>
                 </div>
                 <div class="table-container">
                     <table class="data-table">
@@ -418,21 +690,21 @@
                 </div>
             </div>
 
-            <!-- SECTION 9: Startup Validation Checklist -->
-            <div class="card flat-panel col-span-3">
+            <!-- SECTION: Startup Validation Checklist -->
+            <div class="card flat-panel col-span-3" id="startup-checklist-panel">
                 <div class="card-header">
-                    <h2>[09] ONE-OFF STARTUP HEALTH VALIDATION</h2>
+                    <h2>[V1] PLATFORM VALIDATION CHECKLIST (ONE-OFF STARTUP HEALTH)</h2>
                 </div>
                 <div class="startup-checklist-grid" id="startup-checklist">
                     <!-- Dynamic startup validation checklist cards -->
                 </div>
             </div>
 
-            <!-- SECTION 10: Structured Log Explorer -->
-            <div class="card flat-panel col-span-3">
+            <!-- SECTION: Structured Log Explorer -->
+            <div class="card flat-panel col-span-3" id="log-explorer-panel">
                 <div class="card-header flex-row-between">
                     <div style="display:flex; align-items:center; gap:8px;">
-                        <h2>[10] STRUCTURED LOG EXPLORER</h2>
+                        <h2>[L1] STRUCTURED LOG EXPLORER</h2>
                     </div>
                     <div class="log-controls">
                         <select id="log-service-select" class="mono-font" onchange="loadLogs()">
@@ -461,10 +733,10 @@
                 </div>
             </div>
 
-            <!-- SECTION 11: Market Data Integrity Panel -->
-            <div class="card flat-panel col-span-2">
+            <!-- SECTION: Market Data Integrity Panel -->
+            <div class="card flat-panel col-span-2" id="data-integrity-panel">
                 <div class="card-header flex-row-between">
-                    <h2>[11] MARKET DATA INTEGRITY (PHASE 2C CERTIFICATION)</h2>
+                    <h2>[I1] MARKET DATA INTEGRITY (PHASE 2C CERTIFICATION)</h2>
                     <div style="display:flex; gap:12px; align-items:center;">
                         <span class="lbl font-bold" style="font-size:10px;">CONFIDENCE:</span>
                         <strong id="audit-score-badge" class="highlight-gold" style="font-family:var(--font-mono); font-size:13px;">100.0%</strong>
@@ -519,10 +791,10 @@
                 </div>
             </div>
 
-            <!-- SECTION 12: Indicator Double-line Overlay Charts -->
-            <div class="card flat-panel">
+            <!-- SECTION: Indicator Double-line Overlay Charts -->
+            <div class="card flat-panel" id="double-line-charts-panel">
                 <div class="card-header flex-row-between">
-                    <h2>[12] DOUBLE-LINE OVERLAY TRENDS (ENGINE VS REFERENCE)</h2>
+                    <h2>[C1] DOUBLE-LINE OVERLAY TRENDS (ENGINE VS REFERENCE)</h2>
                     <span class="lbl text-secondary" style="font-size:8px; font-family:var(--font-mono);">SOLID: ENG // DASHED: REF</span>
                 </div>
                 <div style="display:flex; flex-direction:column; gap:8px; width:100%; height:100%;">
@@ -535,16 +807,63 @@
                 </div>
             </div>
 
+            <!-- DAILY SESSION STATISTICS PANEL -->
+            <div class="card flat-panel col-span-3" id="sec-daily-statistics">
+                <div class="card-header">
+                    <h2>[S2] DAILY SESSION STATISTICS</h2>
+                </div>
+                <div class="grid-layout" style="grid-template-columns: repeat(7, 1fr); gap: 12px; padding: 4px 0;">
+                    <div class="summary-item" style="align-items: flex-start;">
+                        <span class="lbl">Trading Date</span>
+                        <span class="val" id="stats-date">--</span>
+                    </div>
+                    <div class="summary-item" style="align-items: flex-start;">
+                        <span class="lbl">Ticks Today</span>
+                        <span class="val highlight" id="stats-ticks">0</span>
+                    </div>
+                    <div class="summary-item" style="align-items: flex-start;">
+                        <span class="lbl">Signals Generated</span>
+                        <span class="val highlight-gold" id="stats-signals">0</span>
+                    </div>
+                    <div class="summary-item" style="align-items: flex-start;">
+                        <span class="lbl">Paper Trades</span>
+                        <span class="val text-success" id="stats-trades">0</span>
+                    </div>
+                    <div class="summary-item" style="align-items: flex-start;">
+                        <span class="lbl">Research Records</span>
+                        <span class="val highlight" id="stats-research">0</span>
+                    </div>
+                    <div class="summary-item" style="align-items: flex-start;">
+                        <span class="lbl">Audit Grade</span>
+                        <span class="val" id="stats-audit-grade">PASS</span>
+                    </div>
+                    <div class="summary-item" style="align-items: flex-start;">
+                        <span class="lbl">Data Confidence</span>
+                        <span class="val highlight-gold" id="stats-confidence">100.00%</span>
+                    </div>
+                </div>
+            </div>
+
         </main>
 
+        <!-- QOT Version Banner Footer with cockpit status lights -->
         <footer>
-            <div class="footer-content">
-                <span>INSTITUTIONAL QUANT OPS CONSOLE // VER 1.0.0</span>
-                <span>ARCHITECTURE FREEZE ACTIVE // observation phase</span>
+            <div class="footer-content" id="qot-footer-bar">
+                <span>QOT // Research Platform // v1.1.0 // Epoch 1 // Day 1</span>
+                <span>
+                    COCKPIT: 
+                    Broker <span id="light-broker">🔴</span> | 
+                    Feed <span id="light-feed">🔴</span> | 
+                    Brain <span id="light-brain">🔴</span> | 
+                    Research <span id="light-research">🔴</span> | 
+                    Audit <span id="light-audit">🔴</span> | 
+                    Cloud <span id="light-cloud">🔴</span> | 
+                    Backup <span id="light-backup">🔴</span>
+                </span>
             </div>
         </footer>
     </div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=2.0"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=2.2"></script>
 </body>
 </html>

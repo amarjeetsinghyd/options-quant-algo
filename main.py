@@ -20,8 +20,92 @@ from datetime import datetime
 from flask import Flask, render_template, jsonify, request
 from src.core.message_bus import MessageBusSubscriber, EXEC_PORT
 from src.utils.logger import get_logger
+import ipaddress
+import time
+from src.config.engineering_config import REMOTE_DASHBOARD_ENABLED
 
 logger = get_logger("ui_node")
+
+# Connected Operators Session Cache
+connected_operators = {}
+
+def is_private_ip(ip_str):
+    if not ip_str:
+        return False
+    if ip_str in ["localhost", "127.0.0.1", "::1"]:
+        return True
+    try:
+        ip = ipaddress.ip_address(ip_str)
+        return ip.is_private or ip.is_loopback
+    except ValueError:
+        return False
+
+def track_operator(session_id, client_ip, user_agent, quality):
+    if not session_id:
+        return
+    now = time.time()
+    
+    # Parse Platform & Browser from User-Agent
+    platform = "Unknown"
+    ua_lower = user_agent.lower() if user_agent else ""
+    if "android" in ua_lower:
+        platform = "Android"
+    elif "iphone" in ua_lower or "ipad" in ua_lower:
+        platform = "iOS"
+    elif "windows" in ua_lower:
+        platform = "Windows"
+    elif "macintosh" in ua_lower or "mac os" in ua_lower:
+        platform = "macOS"
+    elif "linux" in ua_lower:
+        platform = "Linux"
+        
+    browser = "Unknown"
+    if "firefox" in ua_lower:
+        browser = "Firefox"
+    elif "chrome" in ua_lower and "safari" in ua_lower:
+        browser = "Chrome"
+    elif "safari" in ua_lower and "chrome" not in ua_lower:
+        browser = "Safari"
+    elif "edge" in ua_lower:
+        browser = "Edge"
+    elif "opera" in ua_lower or "opr" in ua_lower:
+        browser = "Opera"
+        
+    with state_lock:
+        if session_id not in connected_operators:
+            connected_operators[session_id] = {
+                "session_id": session_id[:8],
+                "ip": client_ip,
+                "platform": platform,
+                "browser": browser,
+                "connection_time": datetime.now().strftime('%H:%M:%S'),
+                "last_activity": now,
+                "connection_quality": quality or "Connected"
+            }
+        else:
+            connected_operators[session_id].update({
+                "last_activity": now,
+                "connection_quality": quality or "Connected",
+                "ip": client_ip
+            })
+            
+    cleanup_inactive_operators()
+
+def cleanup_inactive_operators():
+    now = time.time()
+    stale_threshold = 30.0
+    to_delete = []
+    with state_lock:
+        for sid, op in connected_operators.items():
+            if now - op["last_activity"] > stale_threshold:
+                to_delete.append(sid)
+        for sid in to_delete:
+            del connected_operators[sid]
+
+def get_connected_operators_list():
+    cleanup_inactive_operators()
+    with state_lock:
+        return list(connected_operators.values())
 
 app = Flask(__name__, template_folder='src/web/templates', static_folder='src/web/static')
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -34,6 +118,18 @@ def add_header(response):
     response.headers['Pragma'] = 'no-cache'
     response.headers['Expires'] = '-1'
     return response
+
+@app.before_request
+def check_remote_subnet_and_track():
+    client_ip = request.remote_addr
+    if not is_private_ip(client_ip):
+        return "403 Forbidden: Local Subnet LAN Access Only", 403
+        
+    session_id = request.headers.get("X-Operator-Session-ID")
+    quality = request.headers.get("X-Operator-Connection-Quality")
+    user_agent = request.headers.get("User-Agent", "")
+    if session_id:
+        track_operator(session_id, client_ip, user_agent, quality)
 
 # Load history if exists
 history_data = []
@@ -62,11 +158,12 @@ state = {
 }
 
 def read_dashboard_snapshot():
-    snapshot_path = os.path.join(os.path.dirname(__file__), 'runtime', 'dashboard_snapshot.json')
+    snapshot_path = os.path.join(os.path.dirname(__file__), 'runtime', 'terminal_snapshot.json')
     if os.path.exists(snapshot_path):
         try:
             with open(snapshot_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                envelope = json.load(f)
+                return envelope.get("payload", {}) if "payload" in envelope else envelope
         except Exception:
             pass
     return {}
@@ -80,21 +177,23 @@ def intelligence_lab():
     return render_template('intelligence_lab.html')
 
 def read_service_status():
-    status_path = os.path.join(os.path.dirname(__file__), 'runtime', 'service_status.json')
+    status_path = os.path.join(os.path.dirname(__file__), 'runtime', 'runtime_status.json')
     if os.path.exists(status_path):
         try:
             with open(status_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                envelope = json.load(f)
+                return envelope.get("payload", {}) if "payload" in envelope else envelope
         except Exception as exc:
             logger.warning(f"Could not read service status file: {exc}")
     return {}
 
 def read_startup_validation():
-    val_path = os.path.join(os.path.dirname(__file__), 'runtime', 'startup_validation.json')
+    val_path = os.path.join(os.path.dirname(__file__), 'runtime', 'platform_validation.json')
     if os.path.exists(val_path):
         try:
             with open(val_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                envelope = json.load(f)
+                return envelope.get("payload", {}) if "payload" in envelope else envelope
         except Exception:
             pass
     return {}
@@ -104,6 +203,40 @@ def get_status():
     snapshot = read_dashboard_snapshot()
     status_payload = read_service_status()
     
+    # Calculate dataset certification status
+    dataset_cert = "Certified"
+    audit_dir = os.path.join(os.path.dirname(__file__), 'data', 'audit')
+    manifest_file = os.path.join(audit_dir, 'certification_manifest.json')
+    if os.path.exists(manifest_file):
+        try:
+            with open(manifest_file, 'r', encoding='utf-8') as f:
+                manifest = json.load(f)
+                if manifest and isinstance(manifest, list):
+                    latest_audit = manifest[-1]
+                    grade = latest_audit.get("grade", "Grade A")
+                    if grade in ["Grade F", "FAILED"]:
+                        dataset_cert = "FAILED"
+                    elif grade == "Grade D":
+                        dataset_cert = "WARNING"
+        except Exception:
+            dataset_cert = "WARNING"
+            
+    # Calculate dynamic research day
+    from datetime import date
+    epoch_start = date(2026, 7, 6)
+    today_dt = datetime.now().date()
+    if today_dt < epoch_start:
+        research_day = 1
+    else:
+        research_day = max(1, (today_dt - epoch_start).days + 1)
+        
+    from src.utils.provenance import get_provenance_metadata
+    try:
+        prov = get_provenance_metadata()
+        git_commit = prov.get("git_commit", "unknown")
+    except Exception:
+        git_commit = "unknown"
+    
     payload = {
         "status": "running",
         "error_msg": "",
@@ -112,6 +245,8 @@ def get_status():
         "history": snapshot.get("history", []),
         "chart_data": snapshot.get("chart_data", []),
         "decisions": snapshot.get("decisions", []),
+        "last_ticks": snapshot.get("last_ticks", []),
+        "system_events": snapshot.get("system_events", []),
         "errors": snapshot.get("errors", []),
         "service_status": status_payload.get('services', {}),
         "system_performance": status_payload.get('system_performance', {}),
@@ -119,15 +254,205 @@ def get_status():
         "startup_validation": read_startup_validation(),
         "lifecycle_state": status_payload.get('lifecycle_state', 'OFFLINE'),
         "system_health": status_payload.get('system_health', 'UNKNOWN'),
+        "operator_status": {
+            "connected_sessions": get_connected_operators_list()
+        },
         "service_summary": {
             'engine_pid': status_payload.get('engine_pid'),
             'last_update': status_payload.get('last_update') or snapshot.get("last_update"),
             'schema_version': status_payload.get('schema_version'),
             'platform_version': status_payload.get('platform_version'),
             'generated_at': status_payload.get('generated_at')
+        },
+        "system_info": {
+            "engine_version": "1.1.0",
+            "git_commit": git_commit[:7] if git_commit != "unknown" else "unknown",
+            "research_epoch": 1,
+            "research_day": research_day,
+            "broker": "Angel One",
+            "dataset_certification": dataset_cert
         }
     }
     return jsonify(payload)
+
+NOTIFICATION_HISTORY_FILE = os.path.join(os.path.dirname(__file__), 'runtime', 'notification_history.json')
+
+def load_notification_history():
+    if os.path.exists(NOTIFICATION_HISTORY_FILE):
+        try:
+            with open(NOTIFICATION_HISTORY_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return []
+
+def save_notification_history(history):
+    try:
+        os.makedirs(os.path.dirname(NOTIFICATION_HISTORY_FILE), exist_ok=True)
+        temp_file = NOTIFICATION_HISTORY_FILE + ".tmp"
+        with open(temp_file, 'w', encoding='utf-8') as f:
+            json.dump(history, f, indent=2)
+        os.replace(temp_file, NOTIFICATION_HISTORY_FILE)
+    except Exception as e:
+        logger.error(f"Failed to write notification history: {e}")
+
+@app.route('/api/operator', methods=['GET'])
+def operator_dto():
+    """Stable, read-only DTO interface for QOT Remote monitoring."""
+    snapshot = read_dashboard_snapshot()
+    status_payload = read_service_status()
+    
+    dataset_cert = "Certified"
+    audit_dir = os.path.join(os.path.dirname(__file__), 'data', 'audit')
+    manifest_file = os.path.join(audit_dir, 'certification_manifest.json')
+    if os.path.exists(manifest_file):
+        try:
+            with open(manifest_file, 'r', encoding='utf-8') as f:
+                manifest = json.load(f)
+                if manifest and isinstance(manifest, list):
+                    latest_audit = manifest[-1]
+                    grade = latest_audit.get("grade", "Grade A")
+                    if grade in ["Grade F", "FAILED"]:
+                        dataset_cert = "FAILED"
+                    elif grade == "Grade D":
+                        dataset_cert = "WARNING"
+        except Exception:
+            dataset_cert = "WARNING"
+            
+    from datetime import date
+    epoch_start = date(2026, 7, 6)
+    today_dt = datetime.now().date()
+    research_day = 1 if today_dt < epoch_start else max(1, (today_dt - epoch_start).days + 1)
+        
+    from src.utils.provenance import get_provenance_metadata
+    try:
+        prov = get_provenance_metadata()
+        git_commit = prov.get("git_commit", "unknown")
+    except Exception:
+        git_commit = "unknown"
+        
+    # Construct clean decoupled DTO
+    dto = {
+        "active_trade": snapshot.get("active_trade"),
+        "notifications": load_notification_history(),
+        "feed_health": {
+            "heartbeat": "CONNECTED" if (snapshot.get("last_ticks") and (time.time() * 1000 - snapshot["last_ticks"][-1]["timestamp"] < 2000)) else "OFFLINE",
+            "tick_rate": len(snapshot.get("last_ticks", [])),
+            "clock_drift_ms": int(abs(time.time() * 1000 - (status_payload.get('last_update_ts', time.time()) * 1000))) if status_payload.get('last_update_ts') else 0
+        },
+        "operator_status": {
+            "connected_sessions": get_connected_operators_list()
+        },
+        "runtime_summary": {
+            "lifecycle_state": status_payload.get('lifecycle_state', 'OFFLINE'),
+            "system_cpu_percent": status_payload.get('system_performance', {}).get('system_cpu_percent', 0.0),
+            "system_ram_percent": status_payload.get('system_performance', {}).get('total_ram_percent', 0.0),
+            "platform_ram_mb": sum(s.get('memory_mb', 0.0) for s in status_payload.get('services', {}).values()),
+            "services": {name: s.get('state', 'offline') for name, s in status_payload.get('services', {}).items()}
+        },
+        "system_info": {
+            "engine_version": "1.1.0",
+            "git_commit": git_commit[:7] if git_commit != "unknown" else "unknown",
+            "research_epoch": 1,
+            "research_day": research_day,
+            "broker": "Angel One",
+            "dataset_certification": dataset_cert
+        }
+    }
+    return jsonify(dto)
+
+@app.route('/api/operator/notifications/ack', methods=['POST'])
+def acknowledge_notifications():
+    """Allows operator browsers to update delivery status of notification IDs."""
+    try:
+        data = request.get_json()
+        if not data or "notifications" not in data:
+            return jsonify({"status": "error", "message": "Missing notifications array"}), 400
+            
+        acks = data["notifications"]
+        if not acks:
+            return jsonify({"status": "success", "updated": 0})
+            
+        history = load_notification_history()
+        updated_count = 0
+        
+        # Map notification_id to new status
+        ack_map = {item["notification_id"]: item["status"] for item in acks if "notification_id" in item and "status" in item}
+        
+        for item in history:
+            ev = item.get("event", {})
+            nid = ev.get("notification_id")
+            if nid in ack_map:
+                ev["status"] = ack_map[nid]
+                updated_count += 1
+                
+        if updated_count > 0:
+            save_notification_history(history)
+            
+        return jsonify({"status": "success", "updated": updated_count})
+    except Exception as e:
+        logger.error(f"Error in operator notifications ack: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/api/time_stop_research')
+def get_time_stop_research():
+    import polars as pl
+    parquet_path = os.path.join("data", "research", "time_stop_analysis.parquet")
+    
+    response = {
+        "ev_curve": [0.0] * 8,
+        "best_stop": "N/A",
+        "improvement_pct": 0.0,
+        "sample_size": 0,
+        "confidence": "LOW"
+    }
+    
+    if not os.path.exists(parquet_path):
+        return jsonify(response)
+        
+    try:
+        df = pl.read_parquet(parquet_path)
+        n = len(df)
+        if n == 0:
+            return jsonify(response)
+            
+        marks = ["live_exit_price", "premium_4m", "premium_5m", "premium_6m", "premium_7m", "premium_8m", "premium_9m", "premium_10m"]
+        averages = []
+        for m in marks:
+            avg_val = df[m].mean() if m in df.columns else 0.0
+            averages.append(round(float(avg_val), 2) if avg_val is not None else 0.0)
+            
+        best_idx = 0
+        best_val = averages[0]
+        for i in range(1, len(averages)):
+            if averages[i] > best_val:
+                best_val = averages[i]
+                best_idx = i
+                
+        best_stop_minutes = best_idx + 3
+        
+        base_3m = averages[0]
+        improvement = 0.0
+        if base_3m > 0.0:
+            improvement = ((best_val - base_3m) / base_3m) * 100.0
+            
+        confidence = "LOW"
+        if n >= 20:
+            confidence = "HIGH"
+        elif n >= 5:
+            confidence = "MEDIUM"
+            
+        response = {
+            "ev_curve": averages,
+            "best_stop": f"{best_stop_minutes} min",
+            "improvement_pct": round(improvement, 2),
+            "sample_size": n,
+            "confidence": confidence
+        }
+    except Exception as e:
+        logger.error(f"Error calculating EV curve: {e}")
+        
+    return jsonify(response)
 
 @app.route('/api/audit_status')
 def audit_status():
@@ -560,6 +885,6 @@ def dataset_health():
     })
 
 if __name__ == '__main__':
-
-    logger.info("Starting UI Flask Server on port 5000...")
-    app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
+    host = '0.0.0.0' if REMOTE_DASHBOARD_ENABLED else '127.0.0.1'
+    logger.info(f"Starting UI Flask Server on {host}:5000 (Remote Enabled: {REMOTE_DASHBOARD_ENABLED})...")
+    app.run(host=host, port=5000, debug=False, use_reloader=False)

@@ -1,7 +1,12 @@
+# C:\Quant\src\utils\file_utils.py
+# QOT v1.0.0 — Atomic JSON writing with schema envelope versioning
+
 import os
 import json
 import tempfile
+from datetime import datetime
 from src.utils.logger import get_logger
+from src.utils.provenance import get_provenance_metadata
 
 logger = get_logger("file_utils")
 
@@ -28,3 +33,19 @@ def write_json_atomic(file_path: str, data: dict) -> None:
             except Exception:
                 pass
         raise e
+
+def write_envelope_json_atomic(file_path: str, payload: dict) -> None:
+    """Wraps the payload in a standardized schema versioning envelope and writes it atomically."""
+    try:
+        prov = get_provenance_metadata()
+    except Exception:
+        prov = {"git_commit": "UNKNOWN"}
+        
+    envelope = {
+        "schema_version": "1.0",
+        "generated_at": datetime.now().isoformat(),
+        "engine_version": "1.0.0",
+        "git_commit": prov.get("git_commit", "UNKNOWN"),
+        "payload": payload
+    }
+    write_json_atomic(file_path, envelope)

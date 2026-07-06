@@ -32,21 +32,23 @@ def generate_daily_summary(market_date_str: str = None) -> dict:
             logger.warning(f"Could not read existing daily summaries: {e}")
             
     # 2. Gather snapshot & service metrics
-    snapshot_path = os.path.join("runtime", "dashboard_snapshot.json")
+    snapshot_path = os.path.join("runtime", "terminal_snapshot.json")
     snapshot = {}
     if os.path.exists(snapshot_path):
         try:
             with open(snapshot_path, 'r', encoding='utf-8') as f:
-                snapshot = json.load(f)
+                envelope = json.load(f)
+                snapshot = envelope.get("payload") if "payload" in envelope else envelope
         except Exception:
             pass
             
-    status_path = os.path.join("runtime", "service_status.json")
+    status_path = os.path.join("runtime", "runtime_status.json")
     status = {}
     if os.path.exists(status_path):
         try:
             with open(status_path, 'r', encoding='utf-8') as f:
-                status = json.load(f)
+                envelope = json.load(f)
+                status = envelope.get("payload") if "payload" in envelope else envelope
         except Exception:
             pass
 

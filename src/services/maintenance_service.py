@@ -16,6 +16,50 @@ class MaintenanceService:
         self._stop_event = threading.Event()
         self.last_run_date = None
 
+    def publish_notification(self, event_type, severity, title, description):
+        pub = None
+        try:
+            import uuid
+            from src.utils.provenance import get_provenance_metadata
+            try:
+                git_commit = get_provenance_metadata().get("git_commit", "unknown")[:7]
+            except Exception:
+                git_commit = "unknown"
+                
+            envelope = {
+                "schema_version": "1.0",
+                "generated_at": datetime.utcnow().isoformat() + "Z",
+                "engine_version": "1.1.0",
+                "git_commit": git_commit,
+                "event": {
+                    "notification_id": str(uuid.uuid4()),
+                    "event_type": event_type,
+                    "severity": severity,
+                    "title": title,
+                    "description": description,
+                    "timestamp": int(time.time() * 1000),
+                    "correlation_id": "",
+                    "strategy": "--",
+                    "instrument": "--",
+                    "premium": None,
+                    "pnl": None,
+                    "status": "Generated"
+                }
+            }
+            from src.core.message_bus import MessageBusPublisher, EXEC_PORT
+            pub = MessageBusPublisher(EXEC_PORT)
+            time.sleep(0.1) # brief pause to ensure ZMQ bind is ready
+            pub.publish("EXEC.EVENT", envelope)
+            time.sleep(0.1) # brief pause to flush
+        except Exception as e:
+            logger.error(f"[MaintenanceService] Failed to publish notification: {e}")
+        finally:
+            if pub:
+                try:
+                    pub.close()
+                except Exception:
+                    pass
+
     def _run_eod_tasks(self):
         logger.info("=== STARTING 3:35 PM EOD MAINTENANCE ===")
         try:
@@ -29,17 +73,62 @@ class MaintenanceService:
 
             # 2. Indicator Audit & Data Certification
             logger.info("[EOD Step 2] Running Data Certification Audit...")
+            audit_confidence = 100.00
             try:
                 from src.services.indicator_audit_service import run_daily_audit
-                run_daily_audit()
+                report = run_daily_audit()
+                if report:
+                    audit_confidence = float(report.get("confidence_score", 100.00))
+                    if report.get("research_certification") == "FAILED":
+                        self.publish_notification(
+                            event_type="CERTIFICATION_FAILED",
+                            severity="ERROR",
+                            title="Certification Failed",
+                            description=f"Daily Data Certification Audit Failed for {report.get('market_date')}"
+                        )
             except Exception as audit_exc:
                 logger.error(f"Data Certification Audit error: {audit_exc}")
+                self.publish_notification(
+                    event_type="AUDIT_FAILED",
+                    severity="ERROR",
+                    title="Audit Failed",
+                    description=f"Daily Data Certification Audit crashed: {audit_exc}"
+                )
 
             # 3. Generate Daily Summary
             logger.info("[EOD Step 3] Generating EOD Daily Summary...")
             try:
                 from src.utils.summary_generator import generate_daily_summary
-                generate_daily_summary()
+                summary_data = generate_daily_summary()
+                
+                trade_metrics = summary_data.get("trade_metrics", {})
+                dq = summary_data.get("data_quality", {})
+                
+                total_trades = trade_metrics.get("total_trades", 0)
+                wins = trade_metrics.get("wins", 0)
+                losses = trade_metrics.get("losses", 0)
+                net_pl = trade_metrics.get("net_pl", 0.0)
+                observations = dq.get("decisions_logged", 0)
+                
+                pnl_sign = "+" if net_pl >= 0 else ""
+                eod_desc = (
+                    f"Trades : {total_trades}\n"
+                    f"Wins : {wins}\n"
+                    f"Losses : {losses}\n\n"
+                    f"PnL\n"
+                    f"{pnl_sign}₹{net_pl:.2f}\n\n"
+                    f"Research\n"
+                    f"{observations} observations\n\n"
+                    f"Confidence\n"
+                    f"{audit_confidence:.2f}%"
+                )
+                
+                self.publish_notification(
+                    event_type="DAILY_SUMMARY_READY",
+                    severity="SUCCESS",
+                    title="Trading Day Complete",
+                    description=eod_desc
+                )
             except Exception as sum_exc:
                 logger.error(f"EOD Summary Generator error: {sum_exc}")
 
@@ -69,6 +158,12 @@ class MaintenanceService:
                 run_backup()
             except Exception as backup_exc:
                 logger.error(f"Cloud Backup error: {backup_exc}")
+                self.publish_notification(
+                    event_type="CLOUD_BACKUP_FAILED",
+                    severity="ERROR",
+                    title="Cloud Backup Failed",
+                    description=f"Cloud backup failed to execute: {backup_exc}"
+                )
 
             # 7. Instrument Registry Synchronization
             logger.info("[EOD Step 7] Running EOD Instrument Registry Sync...")

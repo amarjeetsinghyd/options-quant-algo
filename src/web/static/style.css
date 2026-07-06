@@ -1,26 +1,26 @@
 /* style.css — Bloomberg/Grafana Dense flat layout */
 :root {
-    --bg-primary: #04070f;
-    --bg-secondary: #0c101d;
-    --bg-card: #080c16;
+    --bg-primary: #050505;
+    --bg-secondary: #0a0a0a;
+    --bg-card: #050505;
     
-    --border: #1d2538;
-    --border-hover: #313d5a;
+    --border: #151515;
+    --border-hover: #222222;
     
     --text-primary: #ffffff;
-    --text-secondary: #8e9bb4;
-    --text-muted: #4e5b73;
+    --text-secondary: #8e8e8e;
+    --text-muted: #555555;
     
-    --primary: #3b82f6;
-    --success: #10b981;
-    --warning: #f59e0b;
-    --danger: #ef4444;
-    --gold: #eab308;
+    --primary: #00d2ff;
+    --success: #00ff66;
+    --warning: #ffb700;
+    --danger: #ff3333;
+    --gold: #ffcc00;
     
     --font-sans: 'Inter', sans-serif;
     --font-mono: 'JetBrains Mono', monospace;
     
-    --transition: all 0.15s ease-out;
+    --transition: none;
 }
 
 * {
@@ -488,11 +488,14 @@ footer {
     font-weight: 700;
 }
 
-/* Utility classes */
 .mono-font { font-family: var(--font-mono); }
 .text-success { color: var(--success); }
 .text-warning { color: var(--warning); }
 .text-error { color: var(--danger); }
+.text-system { color: #888888; }
+.text-info { color: #ffffff; }
+.text-research { color: #00d2ff; }
+.text-audit { color: #bb66ff; }
 .font-bold { font-weight: 700; }
 .highlight { color: var(--primary); }
 .highlight-gold { color: var(--gold); }
@@ -500,3 +503,122 @@ footer {
 .flex-col-align-start { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
 .text-center { text-align: center; }
 .text-muted { color: var(--text-muted); }
+
+/* Operator banner styles */
+.operator-banner {
+    background: #111111;
+    border-bottom: 1px solid var(--border);
+    padding: 6px 16px;
+    font-size: 10px;
+    font-family: var(--font-mono);
+    font-weight: 700;
+    color: var(--text-secondary);
+    display: flex;
+    justify-content: space-between;
+}
+
+.operator-banner .badge-frozen {
+    color: var(--warning);
+}
+.operator-banner .badge-paper {
+    color: var(--success);
+}
+.badge-purple {
+    background-color: rgba(187, 102, 255, 0.15);
+    color: #bb66ff;
+    padding: 1px 4px;
+    border: 1px solid #bb66ff;
+    font-size: 9px;
+    font-family: var(--font-mono);
+}
+.badge-danger {
+    background-color: rgba(255, 51, 51, 0.15);
+    color: var(--danger);
+    padding: 1px 4px;
+    border: 1px solid var(--danger);
+    font-size: 9px;
+    font-family: var(--font-mono);
+}
+.stale-badge {
+    background: rgba(255, 51, 51, 0.2);
+    color: var(--danger);
+    border: 1px solid var(--danger);
+    padding: 2px 6px;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+/* Responsive layout under 900px */
+@media (max-width: 900px) {
+    .top-nav {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+        position: static;
+    }
+    .nav-left {
+        justify-content: space-between;
+    }
+    .header-summary-grid {
+        grid-auto-flow: row;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+    }
+    .container {
+        padding: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+    .grid-layout {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+    .col-span-2, .col-span-3 {
+        grid-column: span 1;
+    }
+
+    #live-mode-group, #research-mode-group {
+        display: contents !important;
+    }
+
+    #live-mode-group[style*="display: none"],
+    #live-mode-group[style*="display:none"],
+    #research-mode-group[style*="display: none"],
+    #research-mode-group[style*="display:none"] {
+        display: none !important;
+    }
+    
+    /* Responsive stacking order */
+    #live-indicator-panel { order: 10; }
+    #sec-daily-statistics { order: 20; }
+    #active-position-panel { order: 30; }
+    #live-tape-panel { order: 40; }
+    #execution-console-panel { order: 50; }
+    #push-notifications-panel { order: 60; }
+    
+    #feed-health-panel { order: 70; }
+    #strategy-funnel-panel { order: 80; }
+    #heartbeat-tree-panel { order: 90; }
+    
+    #research-queue-panel { order: 100; }
+    #research-summaries-panel { order: 110; }
+    #data-quality-audit-panel { order: 120; }
+    #research-portfolio-panel { order: 130; }
+    #research-provenance-panel { order: 140; }
+    
+    #decision-console-panel { order: 150; }
+    #system-events-panel { order: 160; }
+    #build-info-panel { order: 170; }
+    #process-memory-panel { order: 180; }
+    #minute-timeline-panel { order: 190; }
+    #connection-monitor-panel { order: 200; }
+    #sec-dataset-health { order: 210; }
+    #strategy-stats-panel { order: 220; }
+    #startup-checklist-panel { order: 230; }
+    #log-explorer-panel { order: 240; }
+    #data-integrity-panel { order: 250; }
+    #double-line-charts-panel { order: 260; }
+}
+

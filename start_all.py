@@ -34,7 +34,7 @@ class _DateTimeWrapper:
 # Expose the wrapper under the name ``datetime`` for backward compatibility.
 datetime = _DateTimeWrapper
 
-from src.utils.file_utils import write_json_atomic
+from src.utils.file_utils import write_envelope_json_atomic
 from src.core.telemetry_aggregator import RuntimeTelemetryAggregator
 
 from src.config.engineering_config import (
@@ -53,7 +53,7 @@ from src.utils.market_calendar import is_trading_day
 
 logger = get_logger("start_all")
 
-SERVICE_STATUS_FILE = os.path.join(os.path.dirname(__file__), "runtime", "service_status.json")
+SERVICE_STATUS_FILE = os.path.join(os.path.dirname(__file__), "runtime", "runtime_status.json")
 PID_FILE = os.path.join(os.path.dirname(__file__), "runtime", "quant_engine.pid")
 
 # ── Service definitions ───────────────────────────────────────────────────
@@ -431,7 +431,7 @@ class LifecycleManager:
             "services": self.service_status
         }
         try:
-            write_json_atomic(SERVICE_STATUS_FILE, status_payload)
+            write_envelope_json_atomic(SERVICE_STATUS_FILE, status_payload)
         except Exception as exc:
             logger.warning("Unable to write service status file: %s", exc)
 
