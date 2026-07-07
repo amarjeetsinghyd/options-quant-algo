@@ -102,7 +102,14 @@ class MessageBusSubscriber:
                     topic = self.socket.recv_string(flags=zmq.NOBLOCK)
                     payload_str = self.socket.recv_string(flags=zmq.NOBLOCK)
                     
-                    payload = json.loads(payload_str)
+                    try:
+                        payload = json.loads(payload_str)
+                    except Exception as e:
+                        logger.error(f"[ZMQ] Failed to decode JSON payload on topic '{topic}': {e}")
+                        continue
+                    if not isinstance(payload, dict):
+                        logger.warning(f"[ZMQ] Received non-dict payload on topic '{topic}': {payload}")
+                        continue
                     callback(topic, payload)
                     
             except Exception as e:

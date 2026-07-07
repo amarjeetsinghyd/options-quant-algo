@@ -13,6 +13,10 @@ const tickRateHistory = []; // Tracks ticks/sec for sparkline
 let lastStatusTimestamp = null;
 const panelStaleTimes = {};
 
+// Tape incremental render: track the composite key of the last row rendered
+// so we only prepend genuinely new rows each poll cycle.
+let lastRenderedTickKey = null;
+
 const CONSOLE_VERSION = "1.1.0";
 const shownNotificationIds = new Set();
 let isInitialLoad = true;
@@ -40,6 +44,25 @@ document.addEventListener('DOMContentLoaded', () => {
     // Start smart polling loop
     startPollingLoop();
     
+    // Fix: Mobile & background-tab recovery.
+    // Mobile browsers throttle setTimeout aggressively when the screen locks
+    // or the tab goes to the background. Force an immediate re-poll + loop
+    // reset whenever the page becomes visible again (tab switch, screen unlock).
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+            refreshConsole();
+            startPollingLoop(); // restart the loop so the interval resets cleanly
+        }
+    });
+    window.addEventListener('focus', () => {
+        // Belt-and-suspenders: some mobile browsers fire focus but not
+        // visibilitychange when returning from another app.
+        if (!document.hidden) {
+            refreshConsole();
+            startPollingLoop();
+        }
+    });
+
     // Setup keyboard event listeners
     window.addEventListener('keydown', handleKeyboardShortcuts);
 });
@@ -325,6 +348,8 @@ function updateUI(data) {
             `;
             tbody.appendChild(tr);
         }
+    } // end if (tbody)
+
     // Update connected operators table (Panel 13)
     const connBody = document.getElementById('connection-monitor-body');
     if (connBody && data.operator_status && data.operator_status.connected_sessions) {
@@ -361,7 +386,7 @@ function updateUI(data) {
     // Process Memory Breakdown Card
     updateMemoryAllocation(services);
 
-    // ── RENDER PANEL 1: LIVE TAPE (Ring Buffer of size 200) ──
+    // ── RENDER PANEL 1: LIVE TAPE (incremental prepend, auto-scroll to newest) ──
     const tapeBody = document.getElementById('live-tape-body');
     if (tapeBody && data.last_ticks) {
         if (!isTapePaused) {
@@ -373,61 +398,111 @@ function updateUI(data) {
 
             if (data.last_ticks.length === 0) {
                 tapeBody.innerHTML = '<tr><td colspan="14" class="text-muted text-center">Waiting for market feed ticks...</td></tr>';
+                lastRenderedTickKey = null;
             } else {
-                tapeBody.innerHTML = '';
-                const ticks = [...data.last_ticks].slice(-MAX_TAPE_ROWS).reverse();
-                
-                ticks.forEach(t => {
-                    const tr = document.createElement('tr');
-                    
-                    // Gap detection
-                    let gapStr = '--';
-                    if (lastTickSeq[t.instrument] !== undefined) {
-                        const seqGap = t.tick_seq - lastTickSeq[t.instrument] - 1;
-                        if (seqGap > 0) {
-                            gapStr = `<span class="text-error font-bold">▲ GAP +${seqGap}</span>`;
+                // Build the full sorted list (newest last in source array)
+                const allTicks = [...data.last_ticks].slice(-MAX_TAPE_ROWS);
+
+                // Key = "timestamp|instrument|tick_seq" for the newest tick
+                const newestTick = allTicks[allTicks.length - 1];
+                const newestKey = `${newestTick.timestamp}|${newestTick.instrument}|${newestTick.tick_seq}`;
+
+                if (newestKey === lastRenderedTickKey && tapeBody.rows.length > 0) {
+                    // No new data — skip re-render entirely, keep scroll position
+                } else {
+                    // Find only the new ticks to prepend (ticks newer than what we last rendered)
+                    let newTicks;
+                    if (!lastRenderedTickKey || tapeBody.rows.length === 0) {
+                        // First render — show everything newest-first
+                        newTicks = [...allTicks].reverse();
+                        tapeBody.innerHTML = '';
+                    } else {
+                        // Incremental: only ticks that arrived since last render
+                        // The source array is oldest-first; walk from the end backward
+                        // until we find the previously rendered newest tick.
+                        const prevKey = lastRenderedTickKey;
+                        let splitIdx = allTicks.length - 1;
+                        for (let i = allTicks.length - 1; i >= 0; i--) {
+                            const t = allTicks[i];
+                            const k = `${t.timestamp}|${t.instrument}|${t.tick_seq}`;
+                            if (k === prevKey) { splitIdx = i; break; }
+                        }
+                        // Ticks after splitIdx are brand new
+                        newTicks = allTicks.slice(splitIdx + 1).reverse(); // newest first
+                    }
+
+                    // Build and prepend new rows
+                    if (newTicks.length > 0) {
+                        const fragment = document.createDocumentFragment();
+                        newTicks.forEach(t => {
+                            const tr = document.createElement('tr');
+
+                            // Gap detection
+                            let gapStr = '--';
+                            if (lastTickSeq[t.instrument] !== undefined) {
+                                const seqGap = t.tick_seq - lastTickSeq[t.instrument] - 1;
+                                if (seqGap > 0) {
+                                    gapStr = `<span class="text-error font-bold">▲ GAP +${seqGap}</span>`;
+                                }
+                            }
+                            lastTickSeq[t.instrument] = t.tick_seq;
+
+                            // Delay evaluation
+                            const ageMs = Date.now() - t.timestamp;
+                            let delayClass = 'text-success';
+                            let delayLabel = 'LIVE';
+                            if (ageMs > 1000) {
+                                delayClass = 'text-error';
+                                delayLabel = 'DELAYED';
+                            } else if (ageMs > 200) {
+                                delayClass = 'text-warning';
+                                delayLabel = 'SLOW';
+                            }
+
+                            let chgCell = `<span class="text-muted">0.00</span>`;
+                            if (t.price_change > 0) chgCell = `<span class="text-success">+${t.price_change.toFixed(2)}</span>`;
+                            else if (t.price_change < 0) chgCell = `<span class="text-error">${t.price_change.toFixed(2)}</span>`;
+
+                            let dirCell = `<span class="text-muted">NEUTRAL</span>`;
+                            if (t.tick_direction === 'BUY') dirCell = `<span class="text-success font-bold">BUY</span>`;
+                            else if (t.tick_direction === 'SELL') dirCell = `<span class="text-error font-bold">SELL</span>`;
+
+                            tr.innerHTML = `
+                                <td>${formatMsToTime(t.timestamp)}</td>
+                                <td class="highlight font-bold">${t.instrument}</td>
+                                <td class="font-bold">${t.ltp.toFixed(2)}</td>
+                                <td>${dirCell}</td>
+                                <td>${chgCell}</td>
+                                <td>${t.delta_volume}</td>
+                                <td>${t.bid > 0 ? t.bid.toFixed(2) : '--'}</td>
+                                <td>${t.ask > 0 ? t.ask.toFixed(2) : '--'}</td>
+                                <td>${t.spread > 0 ? t.spread.toFixed(2) : '0.00'}</td>
+                                <td><span class="${t.latency > 500 ? 'text-warning' : 'text-success'}">${t.latency} ms</span></td>
+                                <td>${ageMs} ms</td>
+                                <td>${t.tick_seq}</td>
+                                <td>${gapStr}</td>
+                                <td><span class="chk-badge ${delayClass}">${delayLabel}</span></td>
+                            `;
+                            fragment.appendChild(tr);
+                        });
+
+                        // Prepend new rows at top (newest first)
+                        tapeBody.insertBefore(fragment, tapeBody.firstChild);
+
+                        // Trim excess rows from the bottom to honour MAX_TAPE_ROWS
+                        while (tapeBody.rows.length > MAX_TAPE_ROWS) {
+                            tapeBody.deleteRow(tapeBody.rows.length - 1);
+                        }
+
+                        // Auto-scroll the container back to top so newest rows are visible
+                        const tapeContainer = tapeBody.closest('.table-container');
+                        if (tapeContainer) {
+                            tapeContainer.scrollTop = 0;
                         }
                     }
-                    lastTickSeq[t.instrument] = t.tick_seq;
 
-                    // Delay evaluation
-                    const ageMs = Date.now() - t.timestamp;
-                    let delayClass = 'text-success';
-                    let delayLabel = 'LIVE';
-                    if (ageMs > 1000) {
-                        delayClass = 'text-error';
-                        delayLabel = 'DELAYED';
-                    } else if (ageMs > 200) {
-                        delayClass = 'text-warning';
-                        delayLabel = 'SLOW';
-                    }
-
-                    let chgCell = `<span class="text-muted">0.00</span>`;
-                    if (t.price_change > 0) chgCell = `<span class="text-success">+${t.price_change.toFixed(2)}</span>`;
-                    else if (t.price_change < 0) chgCell = `<span class="text-error">${t.price_change.toFixed(2)}</span>`;
-                    
-                    let dirCell = `<span class="text-muted">NEUTRAL</span>`;
-                    if (t.tick_direction === 'BUY') dirCell = `<span class="text-success font-bold">BUY</span>`;
-                    else if (t.tick_direction === 'SELL') dirCell = `<span class="text-error font-bold">SELL</span>`;
-                    
-                    tr.innerHTML = `
-                        <td>${formatMsToTime(t.timestamp)}</td>
-                        <td class="highlight font-bold">${t.instrument}</td>
-                        <td class="font-bold">${t.ltp.toFixed(2)}</td>
-                        <td>${dirCell}</td>
-                        <td>${chgCell}</td>
-                        <td>${t.delta_volume}</td>
-                        <td>${t.bid > 0 ? t.bid.toFixed(2) : '--'}</td>
-                        <td>${t.ask > 0 ? t.ask.toFixed(2) : '--'}</td>
-                        <td>${t.spread > 0 ? t.spread.toFixed(2) : '0.00'}</td>
-                        <td><span class="${t.latency > 500 ? 'text-warning' : 'text-success'}">${t.latency} ms</span></td>
-                        <td>${ageMs} ms</td>
-                        <td>${t.tick_seq}</td>
-                        <td>${gapStr}</td>
-                        <td><span class="chk-badge ${delayClass}">${delayLabel}</span></td>
-                    `;
-                    tapeBody.appendChild(tr);
-                });
+                    lastRenderedTickKey = newestKey;
+                }
             }
         }
     }

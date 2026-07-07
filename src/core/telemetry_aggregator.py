@@ -126,11 +126,24 @@ class RuntimeTelemetryAggregator:
         self.writer_thread.start()
 
     def _zmq_loop(self):
-        """ZeroMQ listener loop."""
-        try:
-            self.subscriber.listen(self._on_message)
-        except Exception as e:
-            logger.error(f"ZMQ Subscriber error in aggregator: {e}")
+        """ZeroMQ listener loop — reconnects automatically on errors."""
+        while not self._stop_event.is_set():
+            try:
+                # Recreate subscriber if it was closed
+                if self.subscriber is None:
+                    self.subscriber = MessageBusSubscriber(EXEC_PORT, topics=["EXEC."])
+                self.subscriber.listen(self._on_message)
+            except Exception as e:
+                logger.error(f"ZMQ Subscriber error in aggregator: {e}. Reconnecting in 3s...")
+                try:
+                    if self.subscriber:
+                        self.subscriber.close()
+                except Exception:
+                    pass
+                self.subscriber = None
+                if not self._stop_event.is_set():
+                    time.sleep(3)
+
 
     def _on_message(self, topic: str, payload: dict):
         """Processes execution bus ZMQ updates."""
@@ -254,7 +267,8 @@ class RuntimeTelemetryAggregator:
                 self.subscriber.close()
             except Exception as e:
                 logger.warning(f"Error closing ZMQ subscriber: {e}")
-        
+            self.subscriber = None
+
         # Write final snapshot state before closing
         try:
             with self.state_lock:
@@ -267,4 +281,9 @@ class RuntimeTelemetryAggregator:
             self.listener_thread.join(timeout=1.0)
         if self.writer_thread and self.writer_thread.is_alive():
             self.writer_thread.join(timeout=1.0)
+
+        # Reset thread references so start() creates fresh threads
+        self.listener_thread = None
+        self.writer_thread = None
         logger.info("RuntimeTelemetryAggregator stopped.")
+

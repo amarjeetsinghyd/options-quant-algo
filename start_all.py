@@ -12,6 +12,7 @@ import os
 import sys
 import signal
 import time
+import threading
 import socket
 import psutil
 import subprocess
@@ -35,7 +36,8 @@ class _DateTimeWrapper:
 datetime = _DateTimeWrapper
 
 from src.utils.file_utils import write_envelope_json_atomic
-from src.core.telemetry_aggregator import RuntimeTelemetryAggregator
+# RuntimeTelemetryAggregator is now a supervised external service (live_fix_aggregator.py)
+# from src.core.telemetry_aggregator import RuntimeTelemetryAggregator
 
 from src.config.engineering_config import (
     DATA_DIR, 
@@ -158,6 +160,16 @@ SERVICES = [
         "startup_priority": 1,
         "capabilities": ["data-archiving"],
     },
+    {
+        "name": "telemetry_aggregator",
+        "command": [sys.executable, "live_fix_aggregator.py"],
+        "role": "SYSTEM",
+        "enabled": True,
+        "restart_policy": "always",
+        "critical": False,
+        "startup_priority": 11,
+        "capabilities": ["snapshot-writer"],
+    },
 ]
 
 # ── Lifecycle Policy Abstraction ──────────────────────────────────────────
@@ -226,7 +238,15 @@ class LifecycleManager:
         self.system_health = "STARTING"
         self.transition_history = deque(maxlen=500)
         self.shutdown_manager = ShutdownManager()
-        self.telemetry_aggregator = RuntimeTelemetryAggregator()
+        # RuntimeTelemetryAggregator is now a supervised external service
+        # (live_fix_aggregator.py) — use a no-op stub here to preserve
+        # call sites without running a competing in-process writer.
+        class _NoOpAggregator:
+            listener_thread = None
+            writer_thread = None
+            def start(self): pass
+            def stop(self): pass
+        self.telemetry_aggregator = _NoOpAggregator()
         self.peak_cpu = 0.0
         self.peak_ram = 0.0
         self.last_peak_reset = datetime_mod.datetime.now().date()
@@ -597,9 +617,13 @@ class LifecycleManager:
         logger.info("Restarting %s in %ds (attempt %d/%d in window)...",
                     name, delay, count + 1, SUPERVISOR_MAX_RESTARTS)
                     
-        # Sleep locally to apply backoff without blocking the manager loop long-term
-        time.sleep(delay)
-        self.start_service(name, svc["command"])
+        # Run restart in a background thread so the monitor loop (and TelemetryAggregator
+        # watchdog) is never blocked by the backoff sleep.
+        def _do_restart():
+            time.sleep(delay)
+            self.start_service(name, svc["command"])
+        t = threading.Thread(target=_do_restart, name=f"Restart-{name}", daemon=True)
+        t.start()
 
     def monitor(self):
         """Periodic loop to verify running processes, transition aware, avoiding busy-polling."""
@@ -610,7 +634,31 @@ class LifecycleManager:
                 self.shutdown_manager.clear_shutdown_trigger()
                 self.shutdown()
                 break
-                
+
+            # 0b. Watchdog: Restart TelemetryAggregator threads if they have silently died
+            try:
+                agg = self.telemetry_aggregator
+                listener_dead = agg.listener_thread is None or not agg.listener_thread.is_alive()
+                writer_dead = agg.writer_thread is None or not agg.writer_thread.is_alive()
+                if listener_dead or writer_dead:
+                    logger.warning(
+                        "TelemetryAggregator threads dead (listener=%s, writer=%s). Restarting...",
+                        "dead" if listener_dead else "ok",
+                        "dead" if writer_dead else "ok"
+                    )
+                    try:
+                        agg.stop()
+                    except Exception:
+                        pass
+                    import time as _t; _t.sleep(0.5)
+                    try:
+                        agg.start()
+                        logger.info("TelemetryAggregator restarted successfully.")
+                    except Exception as e:
+                        logger.error("Failed to restart TelemetryAggregator: %s", e)
+            except Exception as wdog_err:
+                logger.warning("Aggregator watchdog check failed: %s", wdog_err)
+
             time.sleep(SUPERVISOR_POLLING_INTERVAL_SECONDS)
             
             # 1. Check for scheduled lifecycle state transitions
