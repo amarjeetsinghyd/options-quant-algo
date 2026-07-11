@@ -26,7 +26,7 @@ src/config/token.json
 # Data & Logs
 logs/
 data/
-models/
+/models/
 *.csv
 *.sqlite
 *.sqlite3
