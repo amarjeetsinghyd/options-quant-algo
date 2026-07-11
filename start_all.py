@@ -36,8 +36,7 @@ class _DateTimeWrapper:
 datetime = _DateTimeWrapper
 
 from src.utils.file_utils import write_envelope_json_atomic
-# RuntimeTelemetryAggregator is now a supervised external service (live_fix_aggregator.py)
-# from src.core.telemetry_aggregator import RuntimeTelemetryAggregator
+from src.core.telemetry_aggregator import RuntimeTelemetryAggregator
 
 from src.config.engineering_config import (
     DATA_DIR, 
@@ -232,15 +231,7 @@ class LifecycleManager:
         self.system_health = "STARTING"
         self.transition_history = deque(maxlen=500)
         self.shutdown_manager = ShutdownManager()
-        # RuntimeTelemetryAggregator is now a supervised external service
-        # (live_fix_aggregator.py) — use a no-op stub here to preserve
-        # call sites without running a competing in-process writer.
-        class _NoOpAggregator:
-            listener_thread = None
-            writer_thread = None
-            def start(self): pass
-            def stop(self): pass
-        self.telemetry_aggregator = _NoOpAggregator()
+        self.telemetry_aggregator = RuntimeTelemetryAggregator()
         self.peak_cpu = 0.0
         self.peak_ram = 0.0
         self.last_peak_reset = datetime_mod.datetime.now().date()
