@@ -3,7 +3,10 @@ import json
 import time
 import requests
 import pandas as pd
+import os
 from datetime import datetime, timedelta
+
+ACTIVE_BROKER = os.getenv("ACTIVE_BROKER", "ANGEL").upper()
 
 from src.utils.logger import get_logger
 logger = get_logger("data_fetcher")
@@ -136,7 +139,7 @@ class DataFetcher:
 
     def get_current_futures_token(self):
         name, exch_seg = self.get_active_instrument()
-        res = self.repo.get_futures_token("ANGEL", name, exch_seg)
+        res = self.repo.get_futures_token(ACTIVE_BROKER, name, exch_seg)
         if not res:
             logger.error(f"ERROR: Could not find Futures for {name} on {exch_seg}.")
             return None, None, None
@@ -331,7 +334,7 @@ class DataFetcher:
         
     def get_weekly_option_tokens(self):
         name, exch_seg = self.get_active_instrument()
-        rows = self.repo.get_weekly_option_tokens("ANGEL", name, exch_seg)
+        rows = self.repo.get_weekly_option_tokens(ACTIVE_BROKER, name, exch_seg)
         if not rows:
             return pd.DataFrame()
         return pd.DataFrame(rows)
