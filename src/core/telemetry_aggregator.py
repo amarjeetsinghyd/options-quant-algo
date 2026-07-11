@@ -7,6 +7,8 @@ from src.core.message_bus import MessageBusSubscriber, EXEC_PORT
 from src.utils.logger import get_logger
 from src.utils.file_utils import write_envelope_json_atomic
 
+logger = get_logger("telemetry_aggregator")
+
 def get_notification_priority(event_type: str, description: str) -> str:
     evt = str(event_type).upper()
     desc = str(description).upper()
