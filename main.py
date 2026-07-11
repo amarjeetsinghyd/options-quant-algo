@@ -122,7 +122,7 @@ def add_header(response):
 @app.before_request
 def check_remote_subnet_and_track():
     client_ip = request.remote_addr
-    if not is_private_ip(client_ip):
+    if not REMOTE_DASHBOARD_ENABLED and not is_private_ip(client_ip):
         return "403 Forbidden: Local Subnet LAN Access Only", 403
         
     session_id = request.headers.get("X-Operator-Session-ID")
