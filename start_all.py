@@ -748,6 +748,12 @@ def handle_shutdown(signum, frame):
 
 def main():
     global supervisor
+    
+    # Auto-create essential runtime directories (fixes deployment on fresh environments)
+    os.makedirs(DATA_DIR, exist_ok=True)
+    os.makedirs(LOGS_DIR, exist_ok=True)
+    os.makedirs("runtime", exist_ok=True)
+
     logger.info("------------------------------------------------------------------------")
     logger.info("|      Options Quant Algo - Start All Services                         |")
     logger.info("------------------------------------------------------------------------")
