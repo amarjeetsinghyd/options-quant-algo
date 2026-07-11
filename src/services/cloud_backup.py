@@ -172,15 +172,28 @@ def run_backup():
         logger.error(f"Backup process failed: {e}")
 
 def run_scheduler():
+    import threading
+    import signal
+    import sys
+    
     logger.info("Cloud Backup Scheduler started.")
+    
+    stop_event = threading.Event()
+    
+    def handle_shutdown(signum, frame):
+        logger.info("Cloud backup received shutdown signal.")
+        stop_event.set()
+        
+    signal.signal(signal.SIGINT, handle_shutdown)
+    signal.signal(signal.SIGTERM, handle_shutdown)
+
     # Run once on boot
     run_backup()
     
     # Then sleep forever (or run daily). Since we restart the whole system daily via PM2/cron, 
     # sleeping indefinitely here prevents the supervisor from restarting us aggressively.
-    while True:
-        import time
-        time.sleep(86400) # Sleep for 24 hours
+    while not stop_event.is_set():
+        stop_event.wait(86400) # Sleep for 24 hours, but wake up instantly on shutdown
 
 if __name__ == "__main__":
     run_scheduler()

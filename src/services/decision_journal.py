@@ -138,14 +138,15 @@ class DecisionJournal:
 
     def start(self):
         self.running = True
+        self._stop_event = threading.Event()
         logger.info("=== Scientific Decision Journal Started ===")
         
         # Start MessageBusSubscriber blocking loop in thread
         listen_thread = threading.Thread(target=self.sub.listen, args=(self._on_message,), daemon=True)
         listen_thread.start()
         
-        while self.running:
-            time.sleep(60)
+        while not self._stop_event.is_set():
+            self._stop_event.wait(60)
             self._flush_buffer()
 
 if __name__ == "__main__":
@@ -154,6 +155,7 @@ if __name__ == "__main__":
         journal.start()
     except KeyboardInterrupt:
         logger.info("Shutting down Decision Journal...")
+        journal._stop_event.set()
         journal.running = False
         journal._flush_buffer()
         journal.sub.close()

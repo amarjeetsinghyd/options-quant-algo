@@ -2,6 +2,7 @@ import zmq
 import json
 import threading
 import queue
+import sys
 from typing import Callable
 from src.utils.logger import get_logger
 
@@ -26,8 +27,13 @@ class MessageBusPublisher:
         self.socket.setsockopt(zmq.SNDHWM, 10000)
         
         try:
-            self.socket.bind(f"tcp://127.0.0.1:{self.port}")
-            logger.info(f"[ZMQ] Publisher bound to tcp://127.0.0.1:{self.port}")
+            if sys.platform != "win32":
+                self.addr = f"ipc:///tmp/quant_{self.port}"
+            else:
+                self.addr = f"tcp://127.0.0.1:{self.port}"
+                
+            self.socket.bind(self.addr)
+            logger.info(f"[ZMQ] Publisher bound to {self.addr}")
         except zmq.ZMQError as e:
             logger.error(f"[ZMQ] Failed to bind Publisher to port {self.port}: {e}")
             raise e
@@ -61,10 +67,15 @@ class MessageBusSubscriber:
         self.socket.setsockopt(zmq.RCVHWM, 10000)
         
         try:
-            self.socket.connect(f"tcp://127.0.0.1:{self.port}")
+            if sys.platform != "win32":
+                self.addr = f"ipc:///tmp/quant_{self.port}"
+            else:
+                self.addr = f"tcp://127.0.0.1:{self.port}"
+                
+            self.socket.connect(self.addr)
             for topic in topics:
                 self.socket.setsockopt_string(zmq.SUBSCRIBE, topic)
-            logger.info(f"[ZMQ] Subscriber connected to tcp://127.0.0.1:{self.port}, topics: {topics}")
+            logger.info(f"[ZMQ] Subscriber connected to {self.addr}, topics: {topics}")
         except zmq.ZMQError as e:
             logger.error(f"[ZMQ] Failed to connect Subscriber to port {self.port}: {e}")
             raise e
