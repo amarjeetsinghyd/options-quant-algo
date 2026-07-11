@@ -15,8 +15,8 @@ from src.execution.order_lifecycle import PaperOrderLifecycle
 logger = get_logger("execution_manager")
 
 class ExecutionManager:
-    def __init__(self, api, data_fetcher, history_list=None, order_lifecycle=None):
-        self.api = api
+    def __init__(self, broker_gateway, data_fetcher, history_list=None, order_lifecycle=None):
+        self.broker = broker_gateway
         self.data_fetcher = data_fetcher
         self.capital_engine = CapitalEngine(mode="PAPER")
         self.order_lifecycle = order_lifecycle if order_lifecycle else PaperOrderLifecycle()
@@ -107,7 +107,7 @@ class ExecutionManager:
         if not self.trade_context or self.trade_context.status != "OPEN":
             return
             
-        # If LIVE mode, query self.api.positions() to ensure the leg quantities match reality.
+        # If LIVE mode, query self.broker.portfolio_provider.get_positions() to ensure the leg quantities match reality.
         # This prevents the system from managing a trade that was closed manually or rejected.
         pass
 
@@ -179,8 +179,8 @@ class ExecutionManager:
                 logger.info(f"!!! FAKE BREAKOUT DETECTED !!! Delta NEGATIVE ({delta}).")
                 self.pending_setup = None
 
-    def update_option_cache(self, fetched_data):
-        self._option_cache = {item['symbolToken']: item['ltp'] for item in fetched_data}
+    def update_option_cache(self, fetched_data: dict):
+        self._option_cache.update(fetched_data)
 
     def select_option(self, signal_type):
         weekly_opts = self.data_fetcher.get_weekly_option_tokens()
@@ -263,9 +263,9 @@ class ExecutionManager:
         for leg in self.trade_context.legs:
             if leg.status == "OPEN":
                 try:
-                    res = self.api.ltpData(exch_seg, leg.symbol, leg.token)
-                    if res and res.get('status'):
-                        leg.current_price = float(res['data']['ltp'])
+                    res = self.broker.market_data_provider.get_quote(exch_seg, leg.token)
+                    if res and res.get('ltp', 0.0) > 0:
+                        leg.current_price = res['ltp']
                 except:
                     pass
 

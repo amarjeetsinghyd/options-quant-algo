@@ -180,7 +180,23 @@
                     </div>
                 </div>
 
-                <!-- PANEL 4: Execution Console -->
+                <div class="card flat-panel col-span-1" id="strategy-diagnostics-panel">
+                    <div class="card-header">
+                        <h2>[04] LIVE STRATEGY DIAGNOSTICS</h2>
+                    </div>
+                    <div class="card-body">
+                        <ul id="strategy-diagnostics-list" class="mono-font" style="list-style: none; padding-left: 0; font-size: 12px; line-height: 1.8;">
+                            <li id="diag-S1_DATA_LENGTH" class="text-muted">[ ] 1-Min Data Integrity</li>
+                            <li id="diag-S1_TRIGGER_ALIGNMENT" class="text-muted">[ ] 9 EMA Breakout Confirmed</li>
+                            <li id="diag-S1_ANCHOR_CHECK" class="text-muted">[ ] 15-Minute Trend Alignment</li>
+                            <li id="diag-S1_MOMENTUM_CHECK" class="text-muted">[ ] Momentum Confirmation</li>
+                            
+                            <li id="diag-S3_TRIGGER_ALIGNMENT" class="text-muted" style="margin-top: 10px;">[ ] VWAP Band Breakout Confirmed</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- PANEL 5: Execution Console -->
                 <div class="card flat-panel col-span-1" id="execution-console-panel">
                     <div class="card-header">
                         <h2>[04] EXECUTION CONSOLE</h2>
@@ -712,7 +728,15 @@
                 </div>
             </div>
 
-            <!-- SECTION: Structured Log Explorer -->
+            <!-- SECTION: Shadow Tracking / Opportunity Cost Chart -->
+            <div class="card flat-panel mt-3" id="opportunity-cost-panel" style="height: 300px; padding: 20px;">
+                <h3 style="margin-top:0;">OPPORTUNITY COST: Max Favorable Excursion (Accepted vs Rejected)</h3>
+                <div style="position: relative; width: 100%; height: 230px;">
+                    <canvas id="chart-mfe-canvas" style="position:absolute; top:0; left:0; width:100%; height:100%;"></canvas>
+                </div>
+            </div>
+
+            <!-- SECTION: Realtime Action / Log Console -->
             <div class="card flat-panel col-span-3" id="log-explorer-panel">
                 <div class="card-header flex-row-between">
                     <div style="display:flex; align-items:center; gap:8px;">

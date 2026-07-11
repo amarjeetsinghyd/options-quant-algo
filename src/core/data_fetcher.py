@@ -120,8 +120,8 @@ NIFTY_CASH_TOKEN = "99926000"
 SENSEX_CASH_TOKEN = "99919000"
 
 class DataFetcher:
-    def __init__(self, smartApi):
-        self.api = smartApi
+    def __init__(self, broker_gateway):
+        self.broker = broker_gateway
         from src.core.instrument_repository import InstrumentRepository
         self.repo = InstrumentRepository()
 
@@ -141,16 +141,14 @@ class DataFetcher:
         name, exch_seg = self.get_active_instrument()
         res = self.repo.get_futures_token(ACTIVE_BROKER, name, exch_seg)
         if not res:
-            logger.error(f"ERROR: Could not find Futures for {name} on {exch_seg}.")
+            logger.error(f"Could not find Futures for {name} on {exch_seg}.")
             return None, None, None
-        token, symbol = res
-        return token, symbol, exch_seg
+        return res['token'], res['symbol'], exch_seg
 
     def get_cash_index_token(self):
-        """Returns the Cash Index token for the active instrument."""
-        name, _ = self.get_active_instrument()
+        name, exch_seg = self.get_active_instrument()
         if name == "NIFTY":
-            return NIFTY_CASH_TOKEN, "Nifty 50", "NSE"
+            return NIFTY_CASH_TOKEN, "NIFTY", "NSE"
         else:
             return SENSEX_CASH_TOKEN, "SENSEX", "BSE"
 
@@ -162,50 +160,10 @@ class DataFetcher:
         else:
             return SENSEX_CONSTITUENTS
 
-    def _call_api_with_retry(self, api_func, *args, max_retries=5, initial_delay=1.0, **kwargs):
-        """
-        Executes an Angel One API call with exponential backoff retry logic.
-        Uses the shared rate limiter for getCandleData when available.
-        """
-        if _RATE_LIMITER_AVAILABLE and api_func.__name__ == "getCandleData" and CANDLE_LIMITER is not None:
-            return _rl_call_with_retry(
-                api_func,
-                *args,
-                limiter=CANDLE_LIMITER,
-                max_retries=max_retries,
-                base_delay=initial_delay,
-                **kwargs
-            )
-
-        delay = initial_delay
-        for attempt in range(max_retries):
-            try:
-                # Execute the API function
-                return api_func(*args, **kwargs)
-            except Exception as e:
-                err_msg = str(e)
-                if "exceeding access rate" in err_msg or "Access denied" in err_msg or "rate limit" in err_msg.lower() or "too many requests" in err_msg.lower() or "ab1021" in err_msg.lower():
-                    # Back off and try again
-                    if attempt < max_retries - 1:
-                        logger.info(f"    API Rate Limit hit (attempt {attempt+1}/{max_retries}). Retrying in {delay:.1f}s...")
-                        time.sleep(delay)
-                        delay *= 2.0
-                        continue
-                # If it's a different error or we've run out of retries, raise
-                if attempt < max_retries - 1:
-                    logger.info(f"    API call failed (attempt {attempt+1}/{max_retries}): {e}. Retrying in {delay:.1f}s...")
-                    time.sleep(delay)
-                    delay *= 2.0
-                else:
-                    raise e
-        raise Exception("Max retries exceeded for API call")
-
     def _fetch_constituent_volume(self, days_back=5, minutes_back=None, exact_fromdate=None):
         """
         Fetches 1-min historical data for all constituents of the active index
-        (Nifty 50 or Sensex 30) and returns a DataFrame with the summed volume.
-        Replicates TradingView's exact volume aggregation for the Cash Index.
-        Uses staggered API calls with sleep to avoid rate-limit bans.
+        and returns a DataFrame with the summed volume.
         """
         constituents = self.get_active_constituents()
         todate = datetime.now()
@@ -216,7 +174,6 @@ class DataFetcher:
         else:
             fromdate = todate - timedelta(days=days_back)
         
-        # Determine the exchange segment dynamically based on active instrument
         name, _ = self.get_active_instrument()
         exchange = "NSE" if name == "NIFTY" else "BSE"
         all_volumes = None
@@ -224,20 +181,16 @@ class DataFetcher:
         
         for stock_name, token in constituents.items():
             try:
-                historicParam = {
-                    "exchange": exchange,
-                    "symboltoken": token,
-                    "interval": "ONE_MINUTE",
-                    "fromdate": fromdate.strftime("%Y-%m-%d %H:%M"),
-                    "todate": todate.strftime("%Y-%m-%d %H:%M")
-                }
-                response = self._call_api_with_retry(self.api.getCandleData, historicParam)
+                response_df = self.broker.historical_provider.get_historical(
+                    exchange=exchange,
+                    token=token,
+                    interval="ONE_MINUTE",
+                    start_time=fromdate,
+                    end_time=todate
+                )
                 
-                if response and response.get('status') and response.get('data'):
-                    columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
-                    stock_df = pd.DataFrame(response['data'], columns=columns)
-                    stock_df['timestamp'] = pd.to_datetime(stock_df['timestamp'])
-                    stock_df = stock_df.set_index('timestamp')[['volume']].rename(columns={'volume': stock_name})
+                if not response_df.empty:
+                    stock_df = response_df.set_index('timestamp')[['volume']].rename(columns={'volume': stock_name})
                     
                     if all_volumes is None:
                         all_volumes = stock_df
@@ -245,9 +198,8 @@ class DataFetcher:
                         all_volumes = all_volumes.join(stock_df, how='outer')
                     
                     fetched_count += 1
-                    
-                # Enforce a small inter-request delay even when a shared limiter is available.
-                # This helps avoid API jitter and keeps us safely below 3 req/sec.
+                
+                # Sleep to prevent spamming the provider adapter
                 time.sleep(0.4)
                 
             except Exception as e:
@@ -256,7 +208,6 @@ class DataFetcher:
                 continue
         
         if all_volumes is not None:
-            # Sum across all constituent columns to get synthetic volume
             all_volumes = all_volumes.fillna(0)
             all_volumes['synthetic_volume'] = all_volumes.sum(axis=1)
             logger.info(f"  Synthetic Volume Engine: {fetched_count}/{len(constituents)} constituents loaded.")
@@ -271,20 +222,15 @@ class DataFetcher:
         else:
             fromdate = todate - timedelta(days=days_back)
         
-        historicParam = {
-            "exchange": exchange,
-            "symboltoken": token,
-            "interval": interval,
-            "fromdate": fromdate.strftime("%Y-%m-%d %H:%M"), 
-            "todate": todate.strftime("%Y-%m-%d %H:%M")
-        }
         try:
-            response = self._call_api_with_retry(self.api.getCandleData, historicParam)
-            if response and response.get('status') and response.get('data'):
-                columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
-                df = pd.DataFrame(response['data'], columns=columns)
-                df['timestamp'] = pd.to_datetime(df['timestamp'])
-                return df
+            df = self.broker.historical_provider.get_historical(
+                exchange=exchange,
+                token=token,
+                interval=interval,
+                start_time=fromdate,
+                end_time=todate
+            )
+            return df
         except Exception as e:
             logger.error(f"Error fetching candles for token {token}: {e}")
         return pd.DataFrame()

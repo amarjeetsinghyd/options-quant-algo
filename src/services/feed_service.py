@@ -56,62 +56,38 @@ class FeedService:
             
         logger.info(f"[FeedService] Built token lists: {len(self.eq_tokens)} Equities, {len(self.deriv_tokens)} Derivatives.")
         
-        feed_token = session_data.get("feedToken")
-        jwt_token = session_data.get("jwtToken")
-        client_id = os.getenv("ANGEL_CLIENT_ID")
-        api_key = os.getenv("ANGEL_API_KEY")
-
-        self.ws = broker.market_data_provider.get_websocket_connection(
-            jwt_token, api_key, client_id, feed_token
-        )
-        self.ws.on_open = self.on_open
-        self.ws.on_data = self.on_data
-        self.ws.on_error = self.on_error
-        self.ws.on_close = self.on_close
-        
+        self.broker = broker
         self.reconnect_attempts = 0
         
         # Command Subscriber (listens to Brain for dynamic subscriptions)
         self.cmd_sub = MessageBusSubscriber(CMD_PORT, topics=["CMD.SUBSCRIBE"])
 
-    def on_open(self, wsapp):
+    def on_open(self):
         logger.info("[FeedService] WS Connected. Subscribing to base tokens...")
         self.reconnect_attempts = 0
         try:
-            reqs = []
             if self.eq_tokens:
-                reqs.append({"exchangeType": self.eq_exch_type, "tokens": self.eq_tokens})
+                self.broker.market_data_provider.subscribe(self.eq_tokens, exchange="NSE")
             if self.deriv_tokens:
-                reqs.append({"exchangeType": self.deriv_exch_type, "tokens": self.deriv_tokens})
+                self.broker.market_data_provider.subscribe(self.deriv_tokens, exchange="NFO")
             
-            if reqs:
-                self.ws.subscribe("mega_sub", 3, reqs)
-                logger.info(f"[FeedService] Subscribed to {sum(len(r['tokens']) for r in reqs)} tokens across {len(reqs)} exchanges.")
+            logger.info(f"[FeedService] Subscribed to {len(self.eq_tokens)} Equities and {len(self.deriv_tokens)} Derivatives.")
         except Exception as e:
             logger.error(f"[FeedService] Initial subscribe error: {e}")
 
-    def on_data(self, wsapp, message):
+    def on_data(self, message):
         if isinstance(message, dict):
             token = message.get("token")
             if token:
                 # Enrich tick with universal symbol before publishing.
                 # This is the single injection point that makes ALL downstream
                 # services (brain, canonical, gamma) broker-agnostic.
-                # Fallback: use the symbol field from the broker tick if present.
                 broker_symbol = message.get("symbol", "")
                 message["symbol"] = self.registry.get_symbol(str(token), broker_symbol)
                 self.pub.publish(f"TICK.{token}", message)
 
-    def on_error(self, wsapp, error):
+    def on_error(self, error):
         logger.error(f"[FeedService] WS Error: {error}")
-        # Force a clean disconnect so run_ws can trigger reconnect
-        try:
-            self.ws.close()
-        except:
-            pass
-
-    def on_close(self, wsapp):
-        logger.warning("[FeedService] WS Closed.")
 
     def run_ws(self):
         while True:
@@ -129,23 +105,24 @@ class FeedService:
                 if sleep_sec > 10:
                     logger.info(f"[FeedService] Off-market ({session_type}). Sleeping for {int(sleep_sec)}s until {next_open}.")
                     time.sleep(sleep_sec - 5)  # Wake up 5 seconds early
-                    # NOTE: The exit code 10 is interpreted by the new LifecycleManager as a **daily token refresh** request.
-                    # The service itself does not perform any restart logic – it simply terminates with a distinct code.
-                    logger.warning("[FeedService] Waking up! Exiting to force fresh AngelOne token generation via LifecycleManager.")
+                    logger.warning("[FeedService] Waking up! Exiting to force fresh token generation via LifecycleManager.")
                     sys.exit(10)
             
             try:
-                logger.info(f"[FeedService] Connecting WS (Attempt {self.reconnect_attempts})...")
-                self.ws.connect()
+                logger.info(f"[FeedService] Starting Live Feed (Attempt {self.reconnect_attempts})...")
+                self.broker.market_data_provider.start_live_feed(
+                    on_tick_callback=self.on_data,
+                    on_open_callback=self.on_open,
+                    on_error_callback=self.on_error
+                )
                 self.reconnect_attempts = 0
             except Exception as e:
                 logger.error(f"[FeedService] Connection threw error: {e}")
                 
             self.reconnect_attempts += 1
             if self.reconnect_attempts > 10:
-                logger.critical("[FeedService] Max WS reconnect attempts reached. Halting for 60s.")
+                logger.error("[FeedService] Max reconnect attempts reached. Sleeping for 1 minute before trying again.")
                 time.sleep(60)
-                self.reconnect_attempts = 0
             else:
                 logger.info(f"[FeedService] Reconnecting in 3 seconds (Attempt {self.reconnect_attempts}/10)...")
                 time.sleep(3)
@@ -158,9 +135,8 @@ class FeedService:
                 exchange = payload.get("exchange", "NFO")
                 if tokens:
                     logger.info(f"[FeedService] Received CMD.SUBSCRIBE for {len(tokens)} tokens on {exchange}")
-                    exch_type = 1 if exchange == "NSE" else (2 if exchange == "NFO" else 3)
                     try:
-                        self.ws.subscribe("dyn_sub", 3, [{"exchangeType": exch_type, "tokens": tokens}])
+                        self.broker.market_data_provider.subscribe(tokens, exchange=exchange)
                     except Exception as e:
                         logger.error(f"[FeedService] Dynamic subscribe error: {e}")
                         

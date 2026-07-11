@@ -889,3 +889,32 @@ if __name__ == '__main__':
     host = '0.0.0.0' if REMOTE_DASHBOARD_ENABLED else '127.0.0.1'
     logger.info(f"Starting UI Flask Server on {host}:5000 (Remote Enabled: {REMOTE_DASHBOARD_ENABLED})...")
     app.run(host=host, port=5000, debug=False, use_reloader=False)
+
+@app.route('/api/intelligence/mfe_distribution')
+def mfe_distribution():
+    import json
+    from pathlib import Path
+    outcomes_file = Path('data/insights/signal_outcomes.json')
+    if not outcomes_file.exists():
+        return jsonify({'accepted': [0,0,0,0,0], 'rejected': [0,0,0,0,0]})
+    try:
+        with open(outcomes_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        acc_buckets = [0,0,0,0,0]
+        rej_buckets = [0,0,0,0,0]
+        for d in data:
+            mfe = d.get('mfe_pct', 0)
+            if mfe < 0: idx = 0
+            elif mfe < 5: idx = 1
+            elif mfe < 10: idx = 2
+            elif mfe < 20: idx = 3
+            else: idx = 4
+            if d.get('status') == 'ACCEPTED':
+                acc_buckets[idx] += 1
+            else:
+                rej_buckets[idx] += 1
+        return jsonify({'accepted': acc_buckets, 'rejected': rej_buckets})
+    except Exception as e:
+        logger.error(f'Error reading outcomes: {e}')
+        return jsonify({'accepted': [0,0,0,0,0], 'rejected': [0,0,0,0,0]})
+

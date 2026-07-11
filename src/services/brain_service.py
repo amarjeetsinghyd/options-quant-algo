@@ -42,8 +42,8 @@ class BrainService:
         # Legacy services still expect the raw Angel API client; retrieve it from the adapter.
         # The AngelOneAdapter exposes the client via the ``api`` property.
         self.api = getattr(self.broker, "api", None)
-        # DataFetcher expects the Angel API client; for the default Angel broker this will be present.
-        self.fetcher = DataFetcher(self.api)
+        # DataFetcher now expects the full IBrokerGateway to be API-agnostic
+        self.fetcher = DataFetcher(self.broker)
         self.signal_gen = SignalGenerator()
         
         from src.config.engineering_config import ENABLE_LIVE_BROKERAGE_EXECUTION
@@ -53,7 +53,7 @@ class BrainService:
             from src.execution.order_lifecycle import PaperOrderLifecycle
             order_lifecycle = PaperOrderLifecycle()
             
-        self.trader = ExecutionManager(self.api, self.fetcher, [], order_lifecycle=order_lifecycle)
+        self.trader = ExecutionManager(self.broker, self.fetcher, [], order_lifecycle=order_lifecycle)
         self.strategy_stats = {
             "Strategy 1": {"observed": 0, "candidate": 0, "filtered": 0, "executed": 0, "rejected": 0, "expired": 0},
             "Strategy 2": {"observed": 0, "candidate": 0, "filtered": 0, "executed": 0, "rejected": 0, "expired": 0},
@@ -619,9 +619,13 @@ class BrainService:
                                     # H2: Pre-cache LTPs for Trader asynchronously
                                     def prefetch_options(tokens):
                                         try:
-                                            resp = self.fetcher.api.marketData("LTP", {exch_seg: tokens})
-                                            if resp and resp.get('status') and resp.get('data'):
-                                                self.trader.update_option_cache(resp['data'].get('fetched', []))
+                                            cache = {}
+                                            for token in tokens:
+                                                res = self.broker.market_data_provider.get_quote(exch_seg, token)
+                                                if res and res.get('ltp', 0.0) > 0:
+                                                    cache[token] = res['ltp']
+                                            if cache:
+                                                self.trader.update_option_cache(cache)
                                         except Exception as e:
                                             logger.debug(f"Option prefetch error: {e}")
                                             
@@ -665,30 +669,30 @@ class BrainService:
                             
                             triggered_strategy = None
                             
-                            s1_sig, s1_state = self.signal_gen.check_signal(self.current_df, generate_trace=False)
+                            s1_sig, s1_state = self.signal_gen.check_signal(self.current_df, generate_trace=True)
                             if s1_sig:
                                 triggered_strategy = "Strategy 1"
                                 self.strategy_stats["Strategy 1"]["candidate"] += 1
                                 self.strategy_stats["Strategy 2"]["rejected"] += 1
                                 self.strategy_stats["Strategy 3"]["rejected"] += 1
-                                signal, decision_state = self.signal_gen.check_signal(self.current_df, generate_trace=True)
+                                signal, decision_state = s1_sig, s1_state
                             else:
                                 self.strategy_stats["Strategy 1"]["rejected"] += 1
                                 
-                                s2_sig, s2_state = self.signal_gen.check_rejection_signal(self.current_df, generate_trace=False)
+                                s2_sig, s2_state = self.signal_gen.check_rejection_signal(self.current_df, generate_trace=True)
                                 if s2_sig:
                                     triggered_strategy = "Strategy 2"
                                     self.strategy_stats["Strategy 2"]["candidate"] += 1
                                     self.strategy_stats["Strategy 3"]["rejected"] += 1
-                                    signal, decision_state = self.signal_gen.check_rejection_signal(self.current_df, generate_trace=True)
+                                    signal, decision_state = s2_sig, s2_state
                                 else:
                                     self.strategy_stats["Strategy 2"]["rejected"] += 1
                                     
-                                    s3_sig, s3_state = self.signal_gen.check_vwap_band_breakout_signal(self.current_df, generate_trace=False)
+                                    s3_sig, s3_state = self.signal_gen.check_vwap_band_breakout_signal(self.current_df, generate_trace=True)
                                     if s3_sig:
                                         triggered_strategy = "Strategy 3"
                                         self.strategy_stats["Strategy 3"]["candidate"] += 1
-                                        signal, decision_state = self.signal_gen.check_vwap_band_breakout_signal(self.current_df, generate_trace=True)
+                                        signal, decision_state = s3_sig, s3_state
                                     else:
                                         self.strategy_stats["Strategy 3"]["rejected"] += 1
                                         signal, decision_state = None, s3_state
@@ -696,6 +700,14 @@ class BrainService:
                                         strat2_reason = s2_state.get("human_reason", "Strategy 2 failed")
                                         strat3_reason = s3_state.get("human_reason", "Strategy 3 failed")
                                         decision_state["human_reason"] = f"S1: {strat1_reason} | S2: {strat2_reason} | S3: {strat3_reason}"
+                                        
+                                        # Combine rule evaluations from all strategies if they didn't trigger
+                                        combined_rules = []
+                                        combined_rules.extend(s1_state.get("rule_evaluations", []))
+                                        combined_rules.extend(s2_state.get("rule_evaluations", []))
+                                        combined_rules.extend(s3_state.get("rule_evaluations", []))
+                                        decision_state["rule_evaluations"] = combined_rules
+                                        
                                         decision_state["machine_state"]["strategy_1_state"] = s1_state.get("machine_state", {})
                                         decision_state["machine_state"]["strategy_2_state"] = s2_state.get("machine_state", {})
                         

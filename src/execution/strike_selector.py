@@ -62,9 +62,14 @@ class StrikeSelector:
             if remaining_funds <= 0:
                 break
                 
-            # Angel One stores strike as strike * 100
-            strike_scaled = int(target_strike * 100)
-            match = opts[opts['strike'].astype(float).astype(int) == strike_scaled]
+            # Angel One stores strike as strike * 100 (e.g., 2500000)
+            # Shoonya stores strike as strike (e.g., 25000)
+            # We check both to remain broker agnostic.
+            strike_angel = int(target_strike * 100)
+            strike_shoonya = int(target_strike)
+            
+            opts_strike_int = opts['strike'].astype(float).astype(int)
+            match = opts[(opts_strike_int == strike_angel) | (opts_strike_int == strike_shoonya)]
             
             if match.empty:
                 continue

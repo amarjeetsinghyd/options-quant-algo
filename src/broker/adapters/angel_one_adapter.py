@@ -51,17 +51,54 @@ class AngelSessionProvider(ISessionProvider):
 
 class AngelMarketDataProvider(IMarketDataProvider):
     def __init__(self, api) -> None:
-        # DataFetcher expects the Angel One API client instance.
-        self._data_fetcher = DataFetcher(api)
+        self._api = api
 
-    def get_data_fetcher(self) -> DataFetcher:
-        return self._data_fetcher
+    def start_live_feed(self, on_tick_callback, on_open_callback=None, on_error_callback=None) -> None:
+        client_id = os.getenv("ANGEL_CLIENT_ID")
+        api_key = os.getenv("ANGEL_API_KEY")
+        # To get session data without circular dependencies, we rely on the global session manager
+        from src.core.session_manager import LifecycleManager
+        sm = LifecycleManager()
+        session_data = sm.get_session_data()
+        feed_token = session_data.get("feedToken")
+        jwt_token = session_data.get("jwtToken")
 
-    def get_websocket_connection(self, auth_token: str, api_key: str, client_id: str, feed_token: str) -> Any:
-        # Delegates to the original helper
-        return angel_connection.get_websocket_connection(
-            auth_token, api_key, client_id, feed_token
+        self.ws = angel_connection.get_websocket_connection(
+            jwt_token, api_key, client_id, feed_token
         )
+        
+        # Wrap on_data to standard format (Angel returns standard format by default but just pass it through)
+        def wrapped_on_data(wsapp, message):
+            on_tick_callback(message)
+
+        def wrapped_on_open(wsapp):
+            if on_open_callback: on_open_callback()
+
+        def wrapped_on_error(wsapp, error):
+            if on_error_callback: on_error_callback(error)
+
+        self.ws.on_open = wrapped_on_open
+        self.ws.on_data = wrapped_on_data
+        self.ws.on_error = wrapped_on_error
+        
+        self.ws.connect()
+
+    def subscribe(self, tokens: list, exchange: str) -> None:
+        exch_type = 1 if exchange == "NSE" else (2 if exchange == "NFO" else 3)
+        self.ws.subscribe("mega_sub", 3, [{"exchangeType": exch_type, "tokens": tokens}])
+        
+    def unsubscribe(self, tokens: list, exchange: str) -> None:
+        pass # Angel One does not have a clean unsubscribe list method via SmartWebSocketV2 without mode switch
+
+    def get_quote(self, exchange: str, token: str) -> dict:
+        """Fetch the latest snapshot quote for a given token."""
+        try:
+            res = self._api.ltpData(exchange, "dummy", token) # Angel LTP API
+            if res and res.get('status'):
+                return {"ltp": float(res['data']['ltp'])}
+        except Exception:
+            pass
+        return {"ltp": 0.0}
 
 class AngelExecutionProvider(IExecutionProvider):
     def __init__(self, api) -> None:
@@ -75,8 +112,66 @@ class AngelHistoricalProvider(IHistoricalProvider):
     def __init__(self, api) -> None:
         self._api = api
 
-    def get_historical(self, *args, **kwargs) -> Any:
-        return self._api.get_historical_data(*args, **kwargs)
+    def get_historical(self, exchange: str, token: str, interval: str, start_time, end_time) -> "pd.DataFrame":
+        import pandas as pd
+        import time
+        from src.utils.logger import get_logger
+        logger = get_logger("angel_adapter")
+        
+        # Load rate limiter if available
+        try:
+            from src.core.rate_limiter import CANDLE_LIMITER, call_with_retry as _rl_call_with_retry
+            limiter = CANDLE_LIMITER
+        except ImportError:
+            limiter = None
+            _rl_call_with_retry = None
+
+        historicParam = {
+            "exchange": exchange,
+            "symboltoken": token,
+            "interval": interval,
+            "fromdate": start_time.strftime("%Y-%m-%d %H:%M"), 
+            "todate": end_time.strftime("%Y-%m-%d %H:%M")
+        }
+
+        # Local retry logic for rate limits
+        def _call_api_with_retry(api_func, *args, max_retries=5, initial_delay=1.0, **kwargs):
+            if limiter is not None and _rl_call_with_retry is not None:
+                return _rl_call_with_retry(
+                    api_func, *args, limiter=limiter, max_retries=max_retries, base_delay=initial_delay, **kwargs
+                )
+            
+            delay = initial_delay
+            for attempt in range(max_retries):
+                try:
+                    return api_func(*args, **kwargs)
+                except Exception as e:
+                    err_msg = str(e).lower()
+                    if "exceeding access rate" in err_msg or "access denied" in err_msg or "rate limit" in err_msg or "too many requests" in err_msg or "ab1021" in err_msg:
+                        if attempt < max_retries - 1:
+                            logger.info(f"API Rate Limit hit (attempt {attempt+1}/{max_retries}). Retrying in {delay:.1f}s...")
+                            time.sleep(delay)
+                            delay *= 2.0
+                            continue
+                    if attempt < max_retries - 1:
+                        logger.info(f"API call failed (attempt {attempt+1}/{max_retries}): {e}. Retrying in {delay:.1f}s...")
+                        time.sleep(delay)
+                        delay *= 2.0
+                    else:
+                        raise e
+            raise Exception("Max retries exceeded for API call")
+
+        try:
+            response = _call_api_with_retry(self._api.getCandleData, historicParam)
+            if response and response.get('status') and response.get('data'):
+                columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+                df = pd.DataFrame(response['data'], columns=columns)
+                df['timestamp'] = pd.to_datetime(df['timestamp'])
+                return df
+        except Exception as e:
+            logger.error(f"Error fetching candles for token {token}: {e}")
+            
+        return pd.DataFrame()
 
 class AngelPortfolioProvider(IPortfolioProvider):
     def __init__(self, api) -> None:

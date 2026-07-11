@@ -63,3 +63,7 @@ runtime/
 sandbox/
 boot_error.log
 .serena/
+
+# Shoonya Authentication
+src/broker/adapters/shoonya_session.json
+Shoonya_API_OAuth/

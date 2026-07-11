@@ -152,14 +152,74 @@ class ShoonyaMarketDataProvider(IMarketDataProvider):
             )
         return resp
 
-    def get_websocket_connection(self, *args, **kwargs):
-        # We return the API object; users can call api.start_websocket(...)
-        return self._api
+    def start_live_feed(self, on_tick_callback, on_open_callback=None, on_error_callback=None) -> None:
+        """Start the live market data WebSocket feed, abstracting NorenApiPy."""
+        
+        def event_handler_quote_update(message):
+            if isinstance(message, dict):
+                token = message.get("tk")
+                if not token:
+                    return
+                # Map Shoonya's payload to the standardized TickData format
+                std_msg = {
+                    "token": str(token),
+                    "exchange": message.get("e", "NSE"),
+                    "last_traded_price": float(message.get("lp", 0) or 0),
+                    "last_traded_quantity": int(message.get("ltq", 0) or 0),
+                    "volume_trade_for_the_day": int(message.get("v", 0) or 0),
+                    "average_traded_price": float(message.get("ap", 0) or 0),
+                    "open": float(message.get("o", 0) or 0),
+                    "high": float(message.get("h", 0) or 0),
+                    "low": float(message.get("l", 0) or 0),
+                    "close": float(message.get("c", 0) or 0),
+                    "percent_change": float(message.get("pc", 0) or 0),
+                }
+                # Remove zero values where we might not have received a full tick yet
+                std_msg = {k: v for k, v in std_msg.items() if v != 0 or k in ["last_traded_price"]}
+                on_tick_callback(std_msg)
 
-    def get_data_fetcher(self):
-        """Return the data fetcher utility, resolving IMarketDataProvider abstraction."""
-        from src.core.data_fetcher import DataFetcher
-        return DataFetcher(self._api)
+        def event_handler_order_update(message):
+            pass # Order updates handled separately by ExecutionManager (if via WS)
+
+        def open_callback():
+            if on_open_callback:
+                on_open_callback()
+
+        def error_callback(err):
+            if on_error_callback:
+                on_error_callback(err)
+
+        def close_callback():
+            pass
+
+        self._api.start_websocket(
+            order_update_callback=event_handler_order_update,
+            subscribe_callback=event_handler_quote_update,
+            socket_open_callback=open_callback,
+            socket_close_callback=close_callback,
+            socket_error_callback=error_callback
+        )
+
+    def subscribe(self, tokens: list, exchange: str) -> None:
+        """Translates generic tokens into Shoonya format and subscribes."""
+        if not tokens: return
+        shoonya_tokens = [f"{exchange}|{t}" for t in tokens]
+        self._api.subscribe(shoonya_tokens)
+        
+    def unsubscribe(self, tokens: list, exchange: str) -> None:
+        """Translates generic tokens into Shoonya format and unsubscribes."""
+        if not tokens: return
+        shoonya_tokens = [f"{exchange}|{t}" for t in tokens]
+        self._api.unsubscribe(shoonya_tokens)
+    def get_quote(self, exchange: str, token: str) -> dict:
+        """Fetch the latest snapshot quote for a given token."""
+        try:
+            res = self._api.get_quotes(exchange=exchange, token=token)
+            if isinstance(res, dict) and 'lp' in res:
+                return {"ltp": float(res['lp'])}
+        except Exception:
+            pass
+        return {"ltp": 0.0}
 
 
 class ShoonyaPortfolioProvider(IPortfolioProvider):
@@ -287,16 +347,87 @@ class ShoonyaHistoricalProvider(IHistoricalProvider):
         self._api = api
         self._limiter = TokenBucketLimiter(per_second=3, name="shoonya_historical")
 
-    def get_historical(self, exchange: str, token: str, starttime: int | None = None, endtime: int | None = None, interval: int = 1):
-        if starttime is not None:
-            return call_with_retry(
-                lambda: self._api.get_time_price_series(exchange=exchange, token=token, starttime=starttime, endtime=endtime, interval=interval),
-                limiter=self._limiter
-            )
-        return call_with_retry(
-            lambda: self._api.get_daily_price_series(exchange=exchange, tradingsymbol=token, startdate=str(starttime or 0), enddate=str(endtime)),
-            limiter=self._limiter
-        )
+    def get_historical(self, exchange: str, token: str, interval: str, start_time, end_time) -> "pd.DataFrame":
+        import pandas as pd
+        import datetime
+        from src.utils.logger import get_logger
+        logger = get_logger("shoonya_adapter")
+
+        # Shoonya expects UNIX timestamp (seconds) or date string
+        start_ts = int(start_time.timestamp())
+        end_ts = int(end_time.timestamp())
+
+        # Map 'ONE_MINUTE' to Shoonya interval format (in minutes)
+        interval_map = {
+            "ONE_MINUTE": 1,
+            "THREE_MINUTE": 3,
+            "FIVE_MINUTE": 5,
+            "TEN_MINUTE": 10,
+            "FIFTEEN_MINUTE": 15,
+            "THIRTY_MINUTE": 30,
+            "ONE_HOUR": 60,
+            "ONE_DAY": 1440
+        }
+        shoonya_interval = interval_map.get(interval, 1)
+
+        from src.core.rate_limiter import call_with_retry
+        
+        try:
+            if shoonya_interval < 1440:
+                resp = call_with_retry(
+                    lambda: self._api.get_time_price_series(exchange=exchange, token=token, starttime=start_ts, endtime=end_ts, interval=shoonya_interval),
+                    limiter=self._limiter
+                )
+            else:
+                resp = call_with_retry(
+                    lambda: self._api.get_daily_price_series(exchange=exchange, tradingsymbol=token, startdate=start_time.strftime('%Y-%m-%d'), enddate=end_time.strftime('%Y-%m-%d')),
+                    limiter=self._limiter
+                )
+            
+            if isinstance(resp, list) and len(resp) > 0:
+                df = pd.DataFrame(resp)
+                
+                # Shoonya time price series format mapping:
+                # time -> timestamp, into -> open, inth -> high, intl -> low, intc -> close, intv -> volume
+                # Shoonya daily price series format mapping:
+                # time -> timestamp, into -> open, inth -> high, intl -> low, intc -> close, intv -> volume
+                rename_map = {
+                    'time': 'timestamp',
+                    'ssboe': 'timestamp',  # Some endpoints return ssboe for timestamp
+                    'into': 'open',
+                    'inth': 'high',
+                    'intl': 'low',
+                    'intc': 'close',
+                    'intv': 'volume',
+                    'v': 'volume', # Daily might just use v
+                }
+                
+                df.rename(columns=rename_map, inplace=True)
+                
+                # Standardize columns
+                required_cols = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+                for col in required_cols:
+                    if col not in df.columns:
+                        df[col] = 0
+                
+                df = df[required_cols]
+                
+                # Convert timestamp
+                if df['timestamp'].dtype == 'O': # string format
+                    df['timestamp'] = pd.to_datetime(df['timestamp'], format='mixed', dayfirst=True)
+                else: # numerical
+                    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
+                    
+                # Convert to numeric
+                for col in ['open', 'high', 'low', 'close', 'volume']:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+                    
+                return df
+                
+        except Exception as e:
+            logger.error(f"Shoonya historical data error for {token}: {e}")
+            
+        return pd.DataFrame()
 
 class ShoonyaAdapter(IBrokerGateway):
     def __init__(self) -> None:

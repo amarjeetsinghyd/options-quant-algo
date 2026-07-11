@@ -573,10 +573,7 @@ function updateUI(data) {
                     <td>${timingStr}</td>
                     <td class="text-muted" style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${ruleStr}">${ruleStr}</td>
                 `;
-                decBody.appendChild(tr);
-            });
-        }
-    }
+                decBody.appendChild(tr);});const mostRecent=data.decisions[data.decisions.length-1];if(mostRecent && mostRecent.rule_evaluations){const diagIds=['diag-S1_DATA_LENGTH','diag-S1_TRIGGER_ALIGNMENT','diag-S1_ANCHOR_CHECK','diag-S1_MOMENTUM_CHECK','diag-S3_TRIGGER_ALIGNMENT'];diagIds.forEach(id=>{const el=document.getElementById(id);if(el){el.className='text-muted';el.innerText=el.innerText.replace(/^\[.\]/, '[ ]');}});mostRecent.rule_evaluations.forEach(r=>{const el=document.getElementById('diag-' + r.rule_id);if(el){if(r.result){el.className='text-success font-bold';el.innerText=el.innerText.replace(/^\[.\]/, '[X]');}else{el.className='text-danger';el.innerText=el.innerText.replace(/^\[.\]/, '[ ]');}}});}}}
 
     // ── RENDER PANEL 4: EXECUTION CONSOLE ──
     const execBody = document.getElementById('execution-console-body');
@@ -1633,3 +1630,69 @@ function updateActivePositionCard(trade) {
         </div>
     `;
 }
+
+// --- OPPORTUNITY COST CHART (MFE) ---
+async function fetchAndDrawMFEChart() {
+    try {
+        const res = await safeFetch('/api/intelligence/mfe_distribution');
+        if (!res) return;
+        const data = await res.json();
+        const canvas = document.getElementById('chart-mfe-canvas');
+        if (!canvas) return;
+        
+        const ctx = canvas.getContext('2d');
+        const w = canvas.clientWidth;
+        const h = canvas.clientHeight;
+        canvas.width = w;
+        canvas.height = h;
+        
+        ctx.clearRect(0, 0, w, h);
+        
+        const labels = ['< 0%', '0 - 5%', '5 - 10%', '10 - 20%', '> 20%'];
+        const acc = data.accepted || [0,0,0,0,0];
+        const rej = data.rejected || [0,0,0,0,0];
+        
+        const maxVal = Math.max(...acc, ...rej, 1);
+        
+        const barWidth = 30;
+        const gap = 10;
+        const groupWidth = (barWidth * 2) + gap;
+        const spacing = w / 5;
+        
+        ctx.font = '12px Courier New';
+        ctx.textAlign = 'center';
+        
+        for (let i = 0; i < 5; i++) {
+            const xCenter = (i * spacing) + (spacing / 2);
+            
+            // Draw Label
+            ctx.fillStyle = '#888';
+            ctx.fillText(labels[i], xCenter, h - 5);
+            
+            const accH = (acc[i] / maxVal) * (h - 40);
+            const rejH = (rej[i] / maxVal) * (h - 40);
+            
+            // Accepted Bar (Green)
+            ctx.fillStyle = 'rgba(76, 175, 80, 0.8)';
+            ctx.fillRect(xCenter - barWidth - (gap/2), h - 25 - accH, barWidth, accH);
+            if (acc[i] > 0) {
+                ctx.fillStyle = '#fff';
+                ctx.fillText(acc[i], xCenter - (barWidth/2) - (gap/2), h - 30 - accH);
+            }
+            
+            // Rejected Bar (Red)
+            ctx.fillStyle = 'rgba(244, 67, 54, 0.8)';
+            ctx.fillRect(xCenter + (gap/2), h - 25 - rejH, barWidth, rejH);
+            if (rej[i] > 0) {
+                ctx.fillStyle = '#fff';
+                ctx.fillText(rej[i], xCenter + (barWidth/2) + (gap/2), h - 30 - rejH);
+            }
+        }
+    } catch (e) {
+        console.error('Error drawing MFE chart', e);
+    }
+}
+
+// Add to global refresh loop
+setInterval(fetchAndDrawMFEChart, 10000);
+fetchAndDrawMFEChart();

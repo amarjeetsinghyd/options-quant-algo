@@ -38,12 +38,20 @@ class ISessionProvider(Protocol):
 
 class IMarketDataProvider(Protocol):
     @abstractmethod
-    def get_data_fetcher(self) -> "any":
-        """Return a data fetcher utility for market data."""
+    def start_live_feed(self, on_tick_callback, on_open_callback=None, on_error_callback=None) -> None:
+        """Start the live market data WebSocket feed, passing standard TickData to the callback."""
+        
+    @abstractmethod
+    def subscribe(self, tokens: list, exchange: str) -> None:
+        """Subscribe to a list of tokens on the active feed."""
+        
+    @abstractmethod
+    def unsubscribe(self, tokens: list, exchange: str) -> None:
+        """Unsubscribe from a list of tokens on the active feed."""
 
     @abstractmethod
-    def get_websocket_connection(self, *args, **kwargs) -> "any":
-        """Create and return a websocket connection for live market data."""
+    def get_quote(self, exchange: str, token: str) -> dict:
+        """Fetch the latest snapshot quote for a given token."""
 
 class IExecutionProvider(Protocol):
     @abstractmethod
@@ -52,8 +60,11 @@ class IExecutionProvider(Protocol):
 
 class IHistoricalProvider(Protocol):
     @abstractmethod
-    def get_historical(self, *args, **kwargs) -> "any":
-        """Fetch historical market data."""
+    def get_historical(self, exchange: str, token: str, interval: str, start_time, end_time) -> "pd.DataFrame":
+        """
+        Fetch historical market data and return a standard pandas DataFrame.
+        Expected columns: ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+        """
 
 class IPortfolioProvider(Protocol):
     @abstractmethod

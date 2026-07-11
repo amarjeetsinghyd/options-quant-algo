@@ -113,16 +113,6 @@ SERVICES = [
         "capabilities": ["eod-tasks"],
     },
     {
-        "name": "gap_fill_service",
-        "command": [sys.executable, "-m", "src.services.gap_fill_service"],
-        "role": "SCHEDULER",
-        "enabled": False,
-        "restart_policy": "on-failure",
-        "critical": False,
-        "startup_priority": 4,
-        "capabilities": ["data-validation"],
-    },
-    {
         "name": "health_monitor",
         "command": [sys.executable, "-m", "src.services.health_service"],
         "role": "SYSTEM",
