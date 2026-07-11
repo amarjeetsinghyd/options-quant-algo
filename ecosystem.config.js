@@ -2,8 +2,7 @@ module.exports = {
   apps: [{
     name: "quant-engine",
     script: "start_all.py",
-    interpreter: "venv/Scripts/pythonw.exe",
-    cwd: "C:/Users/Amarjeet Singh/quant_algo_test",
+    interpreter: "venv/bin/python",
     watch: false,
     autorestart: true,
     max_restarts: 10,
