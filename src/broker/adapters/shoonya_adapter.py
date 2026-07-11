@@ -13,7 +13,7 @@ from src.execution.trade_context import TradeLeg
 logger = logging.getLogger("shoonya_adapter")
 
 try:
-    from Shoonya_API_OAuth.api_helper import NorenApiPy
+    from NorenRestApiPy.NorenApi import NorenApi as NorenApiPy
 except Exception as e:
     from src.config.engineering_config import ENABLE_LIVE_BROKERAGE_EXECUTION
     if ENABLE_LIVE_BROKERAGE_EXECUTION:
