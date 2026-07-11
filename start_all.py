@@ -65,7 +65,7 @@ PID_FILE = os.path.join(os.path.dirname(__file__), "runtime", "quant_engine.pid"
 SERVICES = [
     {
         "name": "feed_service",
-        "command": [sys.executable, "src/services/feed_service.py"],
+        "command": [sys.executable, "-m", "src.services.feed_service"],
         "role": "TRADING",
         "enabled": True,
         "restart_policy": "on-failure",
@@ -75,7 +75,7 @@ SERVICES = [
     },
     {
         "name": "brain_service",
-        "command": [sys.executable, "src/services/brain_service.py"],
+        "command": [sys.executable, "-m", "src.services.brain_service"],
         "role": "TRADING",
         "enabled": True,
         "restart_policy": "on-failure",
@@ -85,7 +85,7 @@ SERVICES = [
     },
     {
         "name": "research_collector",
-        "command": [sys.executable, "src/services/research_service.py"],
+        "command": [sys.executable, "-m", "src.services.research_service"],
         "role": "SYSTEM",
         "enabled": True,
         "restart_policy": "always",
@@ -95,7 +95,7 @@ SERVICES = [
     },
     {
         "name": "web_dashboard",
-        "command": [sys.executable, "main.py"],
+        "command": [sys.executable, "-m", "main"],
         "role": "UI",
         "enabled": True,
         "restart_policy": "always",
@@ -105,7 +105,7 @@ SERVICES = [
     },
     {
         "name": "maintenance_service",
-        "command": [sys.executable, "src/services/maintenance_service.py"],
+        "command": [sys.executable, "-m", "src.services.maintenance_service"],
         "role": "SCHEDULER",
         "enabled": True,
         "restart_policy": "always",
@@ -115,7 +115,7 @@ SERVICES = [
     },
     {
         "name": "gap_fill_service",
-        "command": [sys.executable, "src/services/gap_fill_service.py"],
+        "command": [sys.executable, "-m", "src.services.gap_fill_service"],
         "role": "SCHEDULER",
         "enabled": True,
         "restart_policy": "on-failure",
@@ -125,7 +125,7 @@ SERVICES = [
     },
     {
         "name": "health_monitor",
-        "command": [sys.executable, "src/services/health_service.py"],
+        "command": [sys.executable, "-m", "src.services.health_service"],
         "role": "SYSTEM",
         "enabled": True,
         "restart_policy": "always",
@@ -135,7 +135,7 @@ SERVICES = [
     },
     {
         "name": "decision_journal",
-        "command": [sys.executable, "src/services/decision_journal.py"],
+        "command": [sys.executable, "-m", "src.services.decision_journal"],
         "role": "SYSTEM",
         "enabled": True,
         "restart_policy": "always",
@@ -145,7 +145,7 @@ SERVICES = [
     },
     {
         "name": "shadow_service",
-        "command": [sys.executable, "src/services/shadow_service.py"],
+        "command": [sys.executable, "-m", "src.services.shadow_service"],
         "role": "SYSTEM",
         "enabled": ENABLE_SHADOW_SERVICE,
         "restart_policy": "on-failure",
@@ -155,7 +155,7 @@ SERVICES = [
     },
     {
         "name": "cloud_backup",
-        "command": [sys.executable, "src/services/cloud_backup.py"],
+        "command": [sys.executable, "-m", "src.services.cloud_backup"],
         "role": "SCHEDULER",
         "enabled": True,
         "restart_policy": "on-failure",
@@ -163,16 +163,7 @@ SERVICES = [
         "startup_priority": 1,
         "capabilities": ["data-archiving"],
     },
-    {
-        "name": "telemetry_aggregator",
-        "command": [sys.executable, "live_fix_aggregator.py"],
-        "role": "SYSTEM",
-        "enabled": True,
-        "restart_policy": "always",
-        "critical": False,
-        "startup_priority": 11,
-        "capabilities": ["snapshot-writer"],
-    },
+
 ]
 
 # ── Lifecycle Policy Abstraction ──────────────────────────────────────────
