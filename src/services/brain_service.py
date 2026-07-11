@@ -717,7 +717,9 @@ class BrainService:
                                     "vfi_ema": float(latest.get('vfi_ema', 0.0)),
                                     "rvol": float(latest.get('rvol', 1.0)),
                                     "ltp": float(self.live_ltp) if self.live_ltp else float(latest.get('close', 0.0))
-                                }
+                                },
+                                "human_reason": decision_state.get("human_reason", ""),
+                                "rule_evaluations": decision_state.get("rule_evaluations", [])
                             }
                         else:
                             # Level 1: Full Candidate / Filtered row
