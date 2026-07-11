@@ -84,11 +84,10 @@ def authenticate_drive():
                 creds = None
 
         if not creds:
-            if not os.path.exists(CREDS_FILE):
-                logger.error("credentials.json not found! Cannot backup to Google Drive.")
-                return None
-            flow = InstalledAppFlow.from_client_secrets_file(CREDS_FILE, SCOPES)
-            creds = flow.run_local_server(port=0)
+            logger.error("VPS ERROR: Google Drive token is invalid, expired, or missing!")
+            logger.error("Because a VPS has no screen, we cannot open a browser to authenticate.")
+            logger.error("ACTION REQUIRED: Run this script on your personal laptop to generate a fresh 'token.json', then upload it to your VPS.")
+            return None
 
         with open(TOKEN_FILE, "w") as token:
             token.write(creds.to_json())
