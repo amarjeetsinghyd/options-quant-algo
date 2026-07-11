@@ -23,6 +23,7 @@ from src.utils.logger import get_logger
 import ipaddress
 import time
 from src.config.engineering_config import REMOTE_DASHBOARD_ENABLED
+import src.config.engineering_config as config
 
 logger = get_logger("ui_node")
 
@@ -269,7 +270,7 @@ def get_status():
             "git_commit": git_commit[:7] if git_commit != "unknown" else "unknown",
             "research_epoch": 1,
             "research_day": research_day,
-            "broker": "Angel One",
+            "broker": getattr(config, 'BROKER', "Unknown"),
             "dataset_certification": dataset_cert
         }
     }
