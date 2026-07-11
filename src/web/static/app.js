@@ -36,9 +36,11 @@ document.addEventListener('DOMContentLoaded', () => {
     updatePushStatusLabel();
     
     // Initial fetches
-    refreshConsole().then(() => {
-        isInitialLoad = false;
-    });
+    // Previously used refreshConsole().then(...), but refreshConsole is a synchronous function
+    // that does not return a Promise, causing a TypeError. We now call it directly and then
+    // set the flag.
+    refreshConsole();
+    isInitialLoad = false;
     loadLogs();
     
     // Start smart polling loop
@@ -245,7 +247,7 @@ function setDashboardMode(mode) {
 async function fetchStatus() {
     const startTime = Date.now();
     try {
-        const response = await fetch('/api/status', { cache: 'no-store' });
+        const response = await fetch(`${window.location.origin}/api/status`, { cache: 'no-store' });
         if (!response.ok) throw new Error("Offline");
         const data = await response.json();
         
@@ -267,7 +269,7 @@ async function fetchStatus() {
 }
 
 async function fetchTimeStopResearch() {
-    const response = await fetch('/api/time_stop_research', { cache: 'no-store' });
+    const response = await fetch(`${window.location.origin}/api/time_stop_research`, { cache: 'no-store' });
     if (response.ok) {
         const data = await response.json();
         document.getElementById('ts-best-stop').innerText = data.best_stop || 'N/A';
@@ -517,14 +519,18 @@ function updateUI(data) {
             const events = [...data.system_events].slice(-MAX_EVENT_ROWS).reverse();
             events.forEach(e => {
                 const tr = document.createElement('tr');
-                const sevClass = getSeverityClass(e.severity);
+                // Provide safe fallbacks for potentially missing fields to avoid "undefined" rendering
+                const source = e.source ?? '--';
+                const severity = e.severity ?? '--';
+                const message = e.message ?? '--';
+                const sevClass = getSeverityClass(severity);
                 const corrId = e.correlation_id || '--';
                 
                 tr.innerHTML = `
                     <td>${formatMsToTime(e.timestamp)}</td>
-                    <td class="highlight">${e.source}</td>
-                    <td><span class="${sevClass} font-bold">${e.severity}</span></td>
-                    <td class="${sevClass}">${e.message}</td>
+                    <td class="highlight">${source}</td>
+                    <td><span class="${sevClass} font-bold">${severity}</span></td>
+                    <td class="${sevClass}">${message}</td>
                     <td class="text-muted mono-font">${corrId}</td>
                 `;
                 evBody.appendChild(tr);
@@ -895,7 +901,7 @@ function updateMinuteTimeline(data) {
 
 // 3. RESEARCH MODE & SESSION SUMMARIES FETCHING
 async function loadSummaries(mode) {
-    const response = await fetch(`/api/summary?mode=${mode}`);
+    const response = await fetch(`${window.location.origin}/api/summary?mode=${mode}`);
     const summaries = await response.json();
     
     const tbody = document.getElementById('summary-table-body');
@@ -953,7 +959,7 @@ async function loadSummaries(mode) {
 
 // 4. ADAPTIVE DATASET HEALTH TELEMETRY
 async function fetchDatasetHealth() {
-    const res = await fetch('/api/dataset_health');
+    const res = await fetch(`${window.location.origin}/api/dataset_health`);
     const data = await res.json();
     
     const tbody = document.getElementById('dataset-table-body');
@@ -978,7 +984,7 @@ async function fetchDatasetHealth() {
 
 // 5. PHASE 2C DATA CERTIFICATION & TIMELINE
 async function fetchAuditStatus() {
-    const res = await fetch('/api/audit_status');
+    const res = await fetch(`${window.location.origin}/api/audit_status`);
     const data = await res.json();
     
     const latest = data.latest || {};
@@ -1060,7 +1066,7 @@ async function fetchAuditStatus() {
 
 // 6. CANVAS DOUBLE-LINE OVERLAY CHARTS
 async function renderOverlayCharts() {
-    const res = await fetch('/api/chart_data');
+    const res = await fetch(`${window.location.origin}/api/chart_data`);
     const data = await res.json();
     
     if (!Array.isArray(data) || data.length === 0) return;
@@ -1180,7 +1186,7 @@ async function loadLogs() {
     const consoleDiv = document.getElementById('log-console');
     
     try {
-        const res = await fetch(`/api/logs?service=${service}&severity=${logSeverity}&search=${encodeURIComponent(search)}`);
+        const res = await fetch(`${window.location.origin}/api/logs?service=${service}&severity=${logSeverity}&search=${encodeURIComponent(search)}`);
         const data = await res.json();
         
         if (data.lines && data.lines.length > 0) {
@@ -1284,7 +1290,7 @@ function latest_bar_val(data, col) {
 // ── INTERCEPT FETCH TO INJECT OPERATOR SESSIONS & QUALITY HEADERS ──
 const originalFetch = window.fetch;
 window.fetch = async function(url, options = {}) {
-    if (url.startsWith('/api/')) {
+    if (url.startsWith(`${window.location.origin}/api/`)) {
         if (!options.headers) {
             options.headers = {};
         }

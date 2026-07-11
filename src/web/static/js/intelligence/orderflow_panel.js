@@ -1,5 +1,5 @@
 async function loadOrderFlow() {
-    const res = await fetch('/api/intelligence/orderflow');
+    const res = await fetch('${window.location.origin}/api/intelligence/orderflow');
     const data = await res.json();
     if(data.error) return;
     const c = document.getElementById('orderflow-metrics');

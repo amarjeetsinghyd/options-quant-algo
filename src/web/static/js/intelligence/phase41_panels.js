@@ -5,10 +5,10 @@
 async function loadPhase41Data() {
     try {
         const [ofaRes, targetRes, failureRes, vfiRes] = await Promise.all([
-            fetch('/api/intelligence/ofa_health').then(r => r.json()),
-            fetch('/api/intelligence/target_opt').then(r => r.json()),
-            fetch('/api/intelligence/failure_dna').then(r => r.json()),
-            fetch('/api/intelligence/vfi_edge').then(r => r.json())
+            fetch('${window.location.origin}/api/intelligence/ofa_health').then(r => r.json()),
+            fetch('${window.location.origin}/api/intelligence/target_opt').then(r => r.json()),
+            fetch('${window.location.origin}/api/intelligence/failure_dna').then(r => r.json()),
+            fetch('${window.location.origin}/api/intelligence/vfi_edge').then(r => r.json())
         ]);
 
         renderOfaHealth(ofaRes);

@@ -1,5 +1,5 @@
 async function loadOverview() {
-    const res = await fetch('/api/intelligence/overview');
+    const res = await fetch('${window.location.origin}/api/intelligence/overview');
     const data = await res.json();
     const c = document.getElementById('overview-metrics');
 

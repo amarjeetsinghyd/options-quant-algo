@@ -1,7 +1,7 @@
 async function loadExecution() {
-    const res = await fetch('/api/intelligence/execution');
+    const res = await fetch('${window.location.origin}/api/intelligence/execution');
     const data1 = await res.json();
-    const res2 = await fetch('/api/intelligence/scaling');
+    const res2 = await fetch('${window.location.origin}/api/intelligence/scaling');
     const data2 = await res2.json();
     
     const tbody = document.querySelector('#execution-table tbody');

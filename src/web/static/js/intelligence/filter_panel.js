@@ -1,5 +1,5 @@
 async function loadFilters() {
-    const res = await fetch('/api/intelligence/filters');
+    const res = await fetch('${window.location.origin}/api/intelligence/filters');
     const data = await res.json();
     const tbody = document.querySelector('#filter-table tbody');
     tbody.innerHTML = data.map(row => `

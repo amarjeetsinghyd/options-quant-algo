@@ -1,11 +1,11 @@
 async function fetchPhase43Panels() {
     try {
         const [regimeRes, atrRes, vwapRes, vfiRes, qualityRes] = await Promise.all([
-            fetch('/api/intelligence/market_regime').then(r => r.json()),
-            fetch('/api/intelligence/atr_intel').then(r => r.json()),
-            fetch('/api/intelligence/vwap_health').then(r => r.json()),
-            fetch('/api/intelligence/vfi_intel').then(r => r.json()),
-            fetch('/api/intelligence/trade_quality').then(r => r.json())
+            fetch('${window.location.origin}/api/intelligence/market_regime').then(r => r.json()),
+            fetch('${window.location.origin}/api/intelligence/atr_intel').then(r => r.json()),
+            fetch('${window.location.origin}/api/intelligence/vwap_health').then(r => r.json()),
+            fetch('${window.location.origin}/api/intelligence/vfi_intel').then(r => r.json()),
+            fetch('${window.location.origin}/api/intelligence/trade_quality').then(r => r.json())
         ]);
 
         renderMarketRegime(regimeRes);

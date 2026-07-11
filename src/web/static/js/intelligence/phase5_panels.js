@@ -2,7 +2,7 @@ let rawMLData = null;
 
 async function loadPhase5Data() {
     try {
-        const response = await fetch('/api/intelligence/ml_brain');
+        const response = await fetch('${window.location.origin}/api/intelligence/ml_brain');
         const data = await response.json();
         
         if (data.error) {

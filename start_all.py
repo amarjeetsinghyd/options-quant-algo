@@ -55,6 +55,9 @@ from src.utils.market_calendar import is_trading_day
 
 logger = get_logger("start_all")
 
+# Import the generic broker validation runner – this keeps start_all broker‑neutral.
+from src.broker.validation.runner import run_broker_validation
+
 SERVICE_STATUS_FILE = os.path.join(os.path.dirname(__file__), "runtime", "runtime_status.json")
 PID_FILE = os.path.join(os.path.dirname(__file__), "runtime", "quant_engine.pid")
 
@@ -450,6 +453,7 @@ class LifecycleManager:
             "runtime_validation": self.runtime_validation,
             "services": self.service_status
         }
+        logger.debug("Persisting service status to %s (engine PID %s)", SERVICE_STATUS_FILE, os.getpid())
         try:
             write_envelope_json_atomic(SERVICE_STATUS_FILE, status_payload)
         except Exception as exc:
@@ -467,6 +471,8 @@ class LifecycleManager:
         status["restarts"] = self.restart_counts.get(name, 0)
         status["last_update"] = datetime.now().isoformat()
         self._persist_status()
+        # Log the full service status after each update for debugging
+        logger.debug("[start_all] Service status after update: %s", self.service_status)
 
     def _evaluate_system_health(self) -> None:
         """Determines health based on critical vs non-critical services."""
@@ -745,6 +751,20 @@ def main():
     logger.info("------------------------------------------------------------------------")
     logger.info("|      Options Quant Algo - Start All Services                         |")
     logger.info("------------------------------------------------------------------------")
+
+    # ---------------------------------------------------------------------
+    # Pre‑engine broker validation
+    # ---------------------------------------------------------------------
+    validation_result = run_broker_validation()
+    if validation_result.get("status") != "PASS":
+        # Summarize failures for the operator and abort engine start.
+        failed = [step for step, info in validation_result.get("details", {}).items()
+                  if isinstance(info, dict) and info.get("status") == "FAIL"]
+        logger.error("Broker validation failed for %s. Engine start aborted.", validation_result.get("broker"))
+        if failed:
+            logger.error("Failed capabilities: %s", ", ".join(failed))
+        # Ensure the environment remains on the safe fallback broker.
+        sys.exit(1)
 
     # Failsafe: Initialize Universal Instrument Registry if empty
     try:

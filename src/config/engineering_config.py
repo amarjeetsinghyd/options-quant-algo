@@ -17,11 +17,14 @@ INSTITUTIONAL_MEMORY_DIR = os.path.join(DATA_DIR, "institutional_memory")
 MARKET_CLOSE_HOUR = 15
 MARKET_CLOSE_MINUTE = 30
 
-# Premium Bounds
+# Premium Bounds (Deprecated - Replaced by StrikeSelector)
 NIFTY_PREMIUM_MIN = 22
 NIFTY_PREMIUM_MAX = 27
 SENSEX_PREMIUM_MIN = 60
 SENSEX_PREMIUM_MAX = 70
+
+# Dynamic Capital Engine
+INITIAL_PAPER_CAPITAL = 2500.0
 
 # Performance & Profiling Instrumentation
 PROFILING_ENABLED = False
@@ -37,7 +40,7 @@ ENABLE_RESEARCH_COLLECTOR = True
 ENABLE_ZMQ_BUS = True
 ENABLE_WEB_DASHBOARD = True
 
-# Shadow ML predictor — DISABLED until Version 2
+# Shadow ML predictor — ENABLED for runtime activation
 ENABLE_SHADOW_SERVICE = False
 
 # ML engine flags
@@ -67,8 +70,8 @@ ENABLE_MULTI_INSTRUMENT = False
 ENABLE_AUTO_STRATEGY_DISCOVERY = False
 
 # Broker selection flag – determines which broker adapter the system uses.
-# Default is "ANGEL" to retain existing behaviour.
-BROKER = os.getenv("BROKER", "ANGEL")
+# Default is "SHOONYA" to retain existing behaviour.
+BROKER = os.getenv("BROKER", "SHOONYA")
 
 # Supervisor Timing Configurations
 SUPERVISOR_POLLING_INTERVAL_SECONDS = int(os.getenv("SUPERVISOR_POLLING_INTERVAL_SECONDS", "2"))

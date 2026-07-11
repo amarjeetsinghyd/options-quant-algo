@@ -2,7 +2,13 @@ import os
 import json
 import time
 from datetime import datetime
-import pyarrow.parquet as pq
+# pyarrow is an optional dependency for reading Parquet files. It may not be installed
+# in all environments (e.g., during unit testing). Import it lazily and handle the
+# case where it is unavailable.
+try:
+    import pyarrow.parquet as pq
+except ImportError:  # pragma: no cover
+    pq = None
 from src.utils.logger import get_logger
 from src.utils.file_utils import write_json_atomic
 
@@ -82,7 +88,8 @@ def generate_daily_summary(market_date_str: str = None) -> dict:
     losses = sum(1 for t in todays_trades if t.get("result") == "LOSS")
     win_rate = (wins / total_trades * 100) if total_trades > 0 else 0.0
     net_pl = sum(t.get("net_pl", 0.0) for t in todays_trades)
-    avg_expansion = sum(t.get("opt_pct", 0.0) for t in todays_trades) / total_trades if total_trades > 0 else 0.0
+    # Average premium expansion percentage across today's trades
+    avg_expansion = (sum(t.get("opt_pct", 0.0) for t in todays_trades) / total_trades) if total_trades > 0 else 0.0
     
     # Calculate duration average
     durations = []
@@ -103,9 +110,11 @@ def generate_daily_summary(market_date_str: str = None) -> dict:
     # 4. Gather Parquet Row counts (Data Quality Section)
     ticks_path = os.path.join("data", "research", "ticks", f"{market_date_str}.parquet")
     ticks_collected = 0
-    if os.path.exists(ticks_path):
-        try: ticks_collected = pq.ParquetFile(ticks_path).metadata.num_rows
-        except Exception: pass
+    if os.path.exists(ticks_path) and pq is not None:
+        try:
+            ticks_collected = pq.ParquetFile(ticks_path).metadata.num_rows
+        except Exception:
+            pass
         
     features_written = 0
     today_dt = datetime.strptime(market_date_str, '%Y-%m-%d')
@@ -113,17 +122,22 @@ def generate_daily_summary(market_date_str: str = None) -> dict:
     if os.path.exists(feature_dir):
         try:
             parquet_files = [os.path.join(feature_dir, f) for f in os.listdir(feature_dir) if f.endswith('.parquet')]
-            features_written = sum(pq.ParquetFile(p).metadata.num_rows for p in parquet_files)
-        except Exception: pass
+            if pq is not None:
+                features_written = sum(pq.ParquetFile(p).metadata.num_rows for p in parquet_files)
+        except Exception:
+            pass
         
     decisions_logged = 0
     dec_path = os.path.join("data", "decision_history.parquet")
     if os.path.exists(dec_path):
         try:
-            decisions_logged = sum(strategy_stats.get(s, {}).get("observed", 0) for s in ["Strategy 1", "Strategy 2", "Strategy 3"])
-            if decisions_logged == 0:
+            decisions_logged = sum(
+                strategy_stats.get(s, {}).get("observed", 0) for s in ["Strategy 1", "Strategy 2", "Strategy 3"]
+            )
+            if decisions_logged == 0 and pq is not None:
                 decisions_logged = pq.ParquetFile(dec_path).metadata.num_rows
-        except Exception: pass
+        except Exception:
+            pass
 
     # Log write errors scan
     write_errors = 0

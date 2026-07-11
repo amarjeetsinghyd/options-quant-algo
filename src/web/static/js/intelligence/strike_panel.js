@@ -1,5 +1,5 @@
 async function loadStrike() {
-    const res = await fetch('/api/intelligence/strike');
+    const res = await fetch('${window.location.origin}/api/intelligence/strike');
     const data = await res.json();
     const tbody = document.querySelector('#strike-table tbody');
     tbody.innerHTML = data.strikes.map(row => `

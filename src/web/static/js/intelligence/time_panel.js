@@ -1,6 +1,6 @@
 let timeChartInst = null;
 async function loadTime() {
-    const res = await fetch('/api/intelligence/time');
+    const res = await fetch('${window.location.origin}/api/intelligence/time');
     const data = await res.json();
     const dist = data.distribution;
     if(!dist) return;

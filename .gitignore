@@ -60,3 +60,6 @@ task.md
 
 # Non-persistent runtime state
 runtime/
+sandbox/
+boot_error.log
+.serena/

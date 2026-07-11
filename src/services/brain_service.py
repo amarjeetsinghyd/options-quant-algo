@@ -18,7 +18,7 @@ from src.broker import get_broker_adapter
 from src.core.data_fetcher import DataFetcher
 from src.strategy.indicators import append_all_indicators
 from src.strategy.signal_generator import SignalGenerator
-from src.execution.paper_trader import PaperTrader
+from src.execution.execution_manager import ExecutionManager
 from src.core.message_bus import MessageBusPublisher, MessageBusSubscriber, FEED_PORT, CMD_PORT, EXEC_PORT
 from src.utils.logger import get_logger
 from src.ml_engine.gamma_event_collector import GammaEventCollector
@@ -45,7 +45,15 @@ class BrainService:
         # DataFetcher expects the Angel API client; for the default Angel broker this will be present.
         self.fetcher = DataFetcher(self.api)
         self.signal_gen = SignalGenerator()
-        self.trader = PaperTrader(self.api, self.fetcher, [])
+        
+        from src.config.engineering_config import ENABLE_LIVE_BROKERAGE_EXECUTION
+        if ENABLE_LIVE_BROKERAGE_EXECUTION and hasattr(self.broker, "get_order_lifecycle"):
+            order_lifecycle = self.broker.get_order_lifecycle()
+        else:
+            from src.execution.order_lifecycle import PaperOrderLifecycle
+            order_lifecycle = PaperOrderLifecycle()
+            
+        self.trader = ExecutionManager(self.api, self.fetcher, [], order_lifecycle=order_lifecycle)
         self.strategy_stats = {
             "Strategy 1": {"observed": 0, "candidate": 0, "filtered": 0, "executed": 0, "rejected": 0, "expired": 0},
             "Strategy 2": {"observed": 0, "candidate": 0, "filtered": 0, "executed": 0, "rejected": 0, "expired": 0},

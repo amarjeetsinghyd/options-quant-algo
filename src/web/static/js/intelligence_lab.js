@@ -1,6 +1,6 @@
 async function fetchHealth() {
     try {
-        const res = await fetch('/api/intelligence/health');
+        const res = await fetch('${window.location.origin}/api/intelligence/health');
         if (!res.ok) throw new Error('API Error');
         const data = await res.json();
         if (data.error) return;
@@ -74,7 +74,7 @@ async function fetchHealth() {
 
 async function fetchServiceSummary() {
     try {
-        const res = await fetch('/api/status', { cache: 'no-store' });
+        const res = await fetch('${window.location.origin}/api/status', { cache: 'no-store' });
         if (!res.ok) throw new Error('API Error');
         const data = await res.json();
         updateServiceSummary(data.service_summary || {});
@@ -109,7 +109,7 @@ function updateServiceSummary(summary) {
 
 async function fetchLiveState() {
     try {
-        const res = await fetch('/api/intelligence/live_state');
+        const res = await fetch('${window.location.origin}/api/intelligence/live_state');
         if (!res.ok) throw new Error('API Error');
         const data = await res.json();
         
@@ -155,7 +155,7 @@ async function fetchLiveState() {
 
 async function fetchDecisions() {
     try {
-        const res = await fetch('/api/intelligence/decisions');
+        const res = await fetch('${window.location.origin}/api/intelligence/decisions');
         if (!res.ok) throw new Error('API Error');
         const data = await res.json();
         
@@ -217,7 +217,7 @@ async function fetchDecisions() {
 
 async function fetchOrderFlow() {
     try {
-        const res = await fetch('/api/intelligence/order_flow');
+        const res = await fetch('${window.location.origin}/api/intelligence/order_flow');
         if (!res.ok) throw new Error('API Error');
         const data = await res.json();
         
@@ -294,7 +294,7 @@ async function fetchOrderFlow() {
 
 async function fetchTrades() {
     try {
-        const res = await fetch('/api/intelligence/trades');
+        const res = await fetch('${window.location.origin}/api/intelligence/trades');
         if (!res.ok) throw new Error('API Error');
         const data = await res.json();
         
@@ -357,7 +357,7 @@ let _lastLogCount = 0;
 
 async function fetchLogs() {
     try {
-        const res = await fetch('/api/intelligence/logs');
+        const res = await fetch('${window.location.origin}/api/intelligence/logs');
         if (!res.ok) throw new Error('API Error');
         const data = await res.json();
 

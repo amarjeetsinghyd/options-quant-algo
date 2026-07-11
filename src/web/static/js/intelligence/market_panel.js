@@ -1,5 +1,5 @@
 async function loadMarket() {
-    const res = await fetch('/api/intelligence/market');
+    const res = await fetch('${window.location.origin}/api/intelligence/market');
     const data = await res.json();
     const c = document.getElementById('market-metrics');
     c.innerHTML = `

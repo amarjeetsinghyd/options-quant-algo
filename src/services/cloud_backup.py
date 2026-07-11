@@ -3,11 +3,18 @@ import zipfile
 import shutil
 from datetime import datetime
 from pathlib import Path
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
+# The cloud backup service optionally integrates with Google Drive. These
+# dependencies are heavy and not required for the core test suite. Import them
+# lazily and tolerate their absence so that the module can be imported on a
+# minimal development environment.
+try:
+    from google.auth.transport.requests import Request
+    from google.oauth2.credentials import Credentials
+    from google_auth_oauthlib.flow import InstalledAppFlow
+    from googleapiclient.discovery import build
+    from googleapiclient.http import MediaFileUpload
+except Exception:  # pragma: no cover – optional dependency missing
+    Request = Credentials = InstalledAppFlow = build = MediaFileUpload = None
 
 from src.utils.logger import get_logger
 from src.config.engineering_config import DATA_DIR
@@ -53,10 +60,21 @@ def create_backup_zip():
     return zip_path
 
 def authenticate_drive():
+    """Authenticate with Google Drive if the required libraries are available.
+
+    If the optional Google dependencies are missing, this function returns ``None``
+    and the caller will skip the upload step. This allows the module to be
+    imported and used in environments where Google APIs are not installed (e.g.
+    the CI test environment).
+    """
+    if any(dep is None for dep in (Request, Credentials, InstalledAppFlow)):
+        logger.debug("Google Drive libraries not available – skipping authentication.")
+        return None
+
     creds = None
     if os.path.exists(TOKEN_FILE):
         creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
-        
+
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             try:
@@ -64,17 +82,17 @@ def authenticate_drive():
             except Exception as e:
                 logger.warning(f"Could not refresh token: {e}")
                 creds = None
-                
+
         if not creds:
             if not os.path.exists(CREDS_FILE):
                 logger.error("credentials.json not found! Cannot backup to Google Drive.")
                 return None
             flow = InstalledAppFlow.from_client_secrets_file(CREDS_FILE, SCOPES)
             creds = flow.run_local_server(port=0)
-            
-        with open(TOKEN_FILE, 'w') as token:
+
+        with open(TOKEN_FILE, "w") as token:
             token.write(creds.to_json())
-            
+
     return creds
 
 def get_or_create_folder(service, folder_name, parent_id=None):
@@ -98,32 +116,39 @@ def get_or_create_folder(service, folder_name, parent_id=None):
     return files[0].get('id')
 
 def upload_to_drive(file_path):
+    """Upload the backup zip to Google Drive if authentication succeeded.
+
+    When the Google libraries are unavailable this function becomes a no‑op.
+    """
+    if any(dep is None for dep in (build, MediaFileUpload)):
+        logger.debug("Google Drive upload libraries missing – skipping upload.")
+        return
+
     creds = authenticate_drive()
     if not creds:
         return
-        
+
     try:
-        service = build('drive', 'v3', credentials=creds)
+        service = build("drive", "v3", credentials=creds)
         file_name = os.path.basename(file_path)
-        
+
         # Build Folder Hierarchy: Quant_Algo_Backups / YYYY / Month
         now = datetime.now()
         root_folder_id = get_or_create_folder(service, "Quant_Algo_Backups")
         year_folder_id = get_or_create_folder(service, now.strftime("%Y"), root_folder_id)
         month_folder_id = get_or_create_folder(service, now.strftime("%B"), year_folder_id)
-        
-        file_metadata = {
-            'name': file_name,
-            'parents': [month_folder_id]
-        }
-        media = MediaFileUpload(file_path, mimetype='application/zip', resumable=True)
-        
-        logger.info(f"Uploading {file_name} to Google Drive (Quant_Algo_Backups/{now.strftime('%Y/%B')})...")
-        file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-        logger.info(f"Upload complete! File ID: {file.get('id')}")
-        
+
+        file_metadata = {"name": file_name, "parents": [month_folder_id]}
+        media = MediaFileUpload(file_path, mimetype="application/zip", resumable=True)
+
+        logger.info(
+            f"Uploading {file_name} to Google Drive (Quant_Algo_Backups/{now.strftime('%Y/%B')})..."
+        )
+        file = service.files().create(body=file_metadata, media_body=media, fields="id").execute()
+        logger.info("Upload complete! File ID: %s", file.get("id"))
+
     except Exception as e:
-        logger.error(f"Google Drive Upload Error: {e}")
+        logger.error("Google Drive Upload Error: %s", e)
 
 def run_backup():
     try:
@@ -146,6 +171,16 @@ def run_backup():
     except Exception as e:
         logger.error(f"Backup process failed: {e}")
 
+def run_scheduler():
+    logger.info("Cloud Backup Scheduler started.")
+    # Run once on boot
+    run_backup()
+    
+    # Then sleep forever (or run daily). Since we restart the whole system daily via PM2/cron, 
+    # sleeping indefinitely here prevents the supervisor from restarting us aggressively.
+    while True:
+        import time
+        time.sleep(86400) # Sleep for 24 hours
 
 if __name__ == "__main__":
-    run_backup()
+    run_scheduler()

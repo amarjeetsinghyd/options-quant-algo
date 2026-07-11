@@ -1,5 +1,5 @@
 async function loadPremium() {
-    const res = await fetch('/api/intelligence/premium');
+    const res = await fetch('${window.location.origin}/api/intelligence/premium');
     const data = await res.json();
     const tbody = document.querySelector('#premium-table tbody');
     tbody.innerHTML = data.map(row => `

@@ -1,9 +1,9 @@
 async function fetchPhase42Panels() {
     try {
         const [healthRes, freshRes, confRes] = await Promise.all([
-            fetch('/api/system_health').then(r => r.json()),
-            fetch('/api/intelligence/freshness').then(r => r.json()),
-            fetch('/api/intelligence/confidence').then(r => r.json())
+            fetch('${window.location.origin}/api/system_health').then(r => r.json()),
+            fetch('${window.location.origin}/api/intelligence/freshness').then(r => r.json()),
+            fetch('${window.location.origin}/api/intelligence/confidence').then(r => r.json())
         ]);
 
         renderSystemHealth(healthRes);
