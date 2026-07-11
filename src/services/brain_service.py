@@ -145,30 +145,79 @@ class BrainService:
             logger.error(f"[BrainService] Failed to publish notification: {e}")
 
     def boot_sequence(self):
-        logger.info("=== BOOT: Building Synthetic Volume Engine (this takes ~35 seconds) ===")
+        logger.info("=== BOOT: Bootstrapping Brain from Local Disk Cache (Trailing 2-Day Indicator Stream) ===")
         try:
             from src.ml_engine.ml_db import init_ml_db
             init_ml_db(recreate=False)
 
-            from src.services.gap_fill_service import load_cached_boot_dataframe
-            boot_df = load_cached_boot_dataframe()
-            if boot_df is not None and not boot_df.empty:
-                logger.info("=== BOOT: Loaded synthetic volume boot cache from GapFillService ===")
-            else:
-                logger.info("=== BOOT: No current cache found; fetching synthetic volume gap fill directly ===")
-                boot_df = self.fetcher.get_historical_candles_with_synthetic_volume(days_back=5)
+            from src.config.engineering_config import INSTITUTIONAL_MEMORY_DIR
+            from pathlib import Path
+            import pyarrow.parquet as pq
+            import pandas as pd
 
-            if boot_df is not None and not boot_df.empty:
-                self.cached_volume_df = boot_df.set_index('timestamp')[['volume']].rename(columns={'volume': 'synth_vol'})
+            stream_dir = Path(INSTITUTIONAL_MEMORY_DIR) / "indicator_stream"
+
+            dfs = []
+            if stream_dir.exists():
+                all_files = sorted(list(stream_dir.rglob("*.parquet")))
+                for pf in all_files:
+                    try:
+                        df = pd.read_parquet(pf)
+                        dfs.append(df)
+                    except Exception as e:
+                        logger.warning(f"Failed to read parquet file {pf}: {e}")
+
+            if dfs:
+                boot_df = pd.concat(dfs, ignore_index=True)
+                boot_df['timestamp'] = pd.to_datetime(boot_df['timestamp'])
+                boot_df = boot_df.drop_duplicates(subset=['timestamp']).sort_values('timestamp')
+                
+                # Keep only last 2 days of trading data (~750 minutes)
+                boot_df = boot_df.tail(750).reset_index(drop=True)
+                
+                logger.info(f"=== BOOT: Loaded {len(boot_df)} historical rows from local disk ===")
+                
+                self.cached_volume_df = boot_df.set_index('timestamp')[['synth_vol']]
                 self.cached_price_df = boot_df.set_index('timestamp')[['open', 'high', 'low', 'close']]
+                
                 with self._df_lock:
-                    self.current_df = append_all_indicators(boot_df)
-                logger.info("=== BOOT COMPLETE: Synthetic Volume Engine Online ===")
+                    self.current_df = boot_df
+                
+                logger.info("=== BOOT COMPLETE: Engine Online from Local Disk ===")
+                
+                # Run an initial cleanup on boot
+                self._cleanup_old_indicator_streams(datetime.now())
             else:
-                raise RuntimeError("Boot bootstrap data is unavailable after gap fill fallback.")
+                logger.critical("=== BOOT FAILED: No local disk cache found. Cannot start without history. ===")
+                raise RuntimeError("No local indicator_stream data found on disk.")
+
         except Exception as e:
             logger.critical(f"BOOT ERROR: {e}")
             sys.exit(1)
+
+    def _cleanup_old_indicator_streams(self, now: datetime):
+        """Maintains a trailing 2-day window of indicator_stream parquets on disk"""
+        try:
+            from src.config.engineering_config import INSTITUTIONAL_MEMORY_DIR
+            from pathlib import Path
+            stream_dir = Path(INSTITUTIONAL_MEMORY_DIR) / "indicator_stream"
+            
+            if not stream_dir.exists():
+                return
+                
+            # Files older than 2 days
+            cutoff = now - timedelta(days=2)
+            cleaned_count = 0
+            
+            for pf in stream_dir.rglob("*.parquet"):
+                if pf.stat().st_mtime < cutoff.timestamp():
+                    pf.unlink(missing_ok=True)
+                    cleaned_count += 1
+            
+            if cleaned_count > 0:
+                logger.info(f"[Cleanup] Deleted {cleaned_count} old indicator stream files to save VPS disk space.")
+        except Exception as e:
+            logger.error(f"Failed to cleanup old indicator streams: {e}")
 
     def _save_indicator_snapshot(self, now: datetime):
         """
@@ -216,6 +265,10 @@ class BrainService:
 
             table = pa.Table.from_pandas(df, preserve_index=False)
             pq.write_table(table, save_path, compression="zstd")
+            
+            # Run trailing cleanup once an hour
+            if now.minute == 0:
+                self._cleanup_old_indicator_streams(now)
 
         except Exception as e:
             logger.warning(f"[IndicatorStream] Could not save snapshot: {e}")

@@ -116,7 +116,7 @@ SERVICES = [
         "name": "gap_fill_service",
         "command": [sys.executable, "-m", "src.services.gap_fill_service"],
         "role": "SCHEDULER",
-        "enabled": True,
+        "enabled": False,
         "restart_policy": "on-failure",
         "critical": False,
         "startup_priority": 4,
