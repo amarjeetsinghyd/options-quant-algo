@@ -122,11 +122,11 @@ def upload_to_drive(file_path):
     """
     if any(dep is None for dep in (build, MediaFileUpload)):
         logger.debug("Google Drive upload libraries missing – skipping upload.")
-        return
+        return False
 
     creds = authenticate_drive()
     if not creds:
-        return
+        return False
 
     try:
         service = build("drive", "v3", credentials=creds)
@@ -146,9 +146,11 @@ def upload_to_drive(file_path):
         )
         file = service.files().create(body=file_metadata, media_body=media, fields="id").execute()
         logger.info("Upload complete! File ID: %s", file.get("id"))
+        return True
 
     except Exception as e:
         logger.error("Google Drive Upload Error: %s", e)
+        return False
 
 def run_backup():
     try:
@@ -160,12 +162,22 @@ def run_backup():
             logger.info(f"Cleaned up orphan zip: {old_zip.name}")
         
         zip_path = create_backup_zip()
-        upload_to_drive(zip_path)
+        upload_success = upload_to_drive(zip_path)
         
-        # Cleanup local zip after successful upload
+        # Cleanup local zip after successful upload attempt
         if os.path.exists(zip_path):
             os.remove(zip_path)
             logger.info("Cleaned up local zip file.")
+            
+        # Flush Parquet Datasets if it's Friday AND the backup was safely uploaded to Google Drive
+        if upload_success and datetime.now().weekday() == 4:
+            logger.info("It is Friday! Flushing local parquet datasets to save VPS disk space...")
+            for parquet_file in Path(DATA_DIR).rglob("*.parquet"):
+                try:
+                    parquet_file.unlink()
+                    logger.info(f"Flushed: {parquet_file.name}")
+                except Exception as e:
+                    logger.error(f"Could not flush {parquet_file.name}: {e}")
             
         logger.info("Cloud backup process finished.")
     except Exception as e:
