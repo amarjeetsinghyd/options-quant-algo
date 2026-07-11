@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Optional
 from src.config.engineering_config import BROKER, SYMBOL_REGISTRY_CACHE_SIZE
 from src.core.instrument_repository import InstrumentRepository
 from src.utils.logger import get_logger

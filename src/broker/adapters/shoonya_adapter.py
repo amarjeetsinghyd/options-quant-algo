@@ -156,6 +156,11 @@ class ShoonyaMarketDataProvider(IMarketDataProvider):
         # We return the API object; users can call api.start_websocket(...)
         return self._api
 
+    def get_data_fetcher(self):
+        """Return the data fetcher utility, resolving IMarketDataProvider abstraction."""
+        from src.core.data_fetcher import DataFetcher
+        return DataFetcher(self._api)
+
 
 class ShoonyaPortfolioProvider(IPortfolioProvider):
     def __init__(self, api: NorenApiPy):
