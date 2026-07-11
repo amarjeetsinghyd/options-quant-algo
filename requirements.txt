@@ -5,7 +5,6 @@ websocket-client
 pandas
 python-dotenv
 flask
-xgboost
 pyzmq
 polars
 pyarrow
