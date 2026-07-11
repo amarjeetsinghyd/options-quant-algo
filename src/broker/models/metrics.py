@@ -9,10 +9,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 
 
-@dataclass(slots=True)
+@dataclass()
 class BrokerMetrics:
     # Latency statistics (in milliseconds)
     rest_latency_ms: List[float] = field(default_factory=list)

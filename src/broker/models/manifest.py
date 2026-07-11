@@ -15,14 +15,14 @@ from typing import Literal, Optional, Tuple
 # ---------------------------------------------------------------------------
 # Identity & Authentication
 # ---------------------------------------------------------------------------
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class IdentityCapability:
     broker_name: str
     broker_version: str
     vendor: Optional[str] = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class AuthenticationCapability:
     mechanism: Literal["api_key", "oauth2", "jwt", "none"]
     token_endpoint: Optional[str] = None
@@ -33,7 +33,7 @@ class AuthenticationCapability:
 # ---------------------------------------------------------------------------
 # Rate Limits & Performance Recommendations
 # ---------------------------------------------------------------------------
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class RateLimitCapability:
     rest_requests_per_sec: float
     order_requests_per_sec: float
@@ -41,7 +41,7 @@ class RateLimitCapability:
     burst_capacity: Optional[int] = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class PerformanceRecommendation:
     recommended_batch_size: int = 100
     recommended_retry_delay_ms: int = 200
@@ -52,7 +52,7 @@ class PerformanceRecommendation:
 # ---------------------------------------------------------------------------
 # WebSocket Capabilities
 # ---------------------------------------------------------------------------
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class WebSocketCapability:
     max_subscriptions: int
     tick_format: Literal["raw", "compressed", "json"]
@@ -65,7 +65,7 @@ class WebSocketCapability:
 # ---------------------------------------------------------------------------
 # Market Data & Historical Data
 # ---------------------------------------------------------------------------
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class MarketDataCapability:
     live_quotes: bool
     ohlc: bool
@@ -75,7 +75,7 @@ class MarketDataCapability:
     streaming_supported: bool = True
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class HistoricalDataCapability:
     max_lookback_days: int
     max_candles_per_request: int
@@ -86,7 +86,7 @@ class HistoricalDataCapability:
 # ---------------------------------------------------------------------------
 # Order Management
 # ---------------------------------------------------------------------------
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class OrderManagementCapability:
     modify_order: bool
     cancel_order: bool
@@ -101,7 +101,7 @@ class OrderManagementCapability:
 # ---------------------------------------------------------------------------
 # Product & Exchange Support
 # ---------------------------------------------------------------------------
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ProductSupportCapability:
     equities: bool
     futures: bool
@@ -111,7 +111,7 @@ class ProductSupportCapability:
     derivatives: bool = False
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ExchangeSupportCapability:
     exchanges: Tuple[str, ...]
     primary_exchange: Optional[str] = None
@@ -120,7 +120,7 @@ class ExchangeSupportCapability:
 # ---------------------------------------------------------------------------
 # Feature Flags
 # ---------------------------------------------------------------------------
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class FeatureFlagCapability:
     paper_trading: bool = False
     replay_mode: bool = False
@@ -131,7 +131,7 @@ class FeatureFlagCapability:
 # ---------------------------------------------------------------------------
 # Top‑level Manifest
 # ---------------------------------------------------------------------------
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class BrokerManifest:
     """Immutable, static description of a broker implementation."""
 

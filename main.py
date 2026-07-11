@@ -22,6 +22,7 @@ from src.core.message_bus import MessageBusSubscriber, EXEC_PORT
 from src.utils.logger import get_logger
 import ipaddress
 import time
+import platform
 from src.config.engineering_config import REMOTE_DASHBOARD_ENABLED
 import src.config.engineering_config as config
 
@@ -271,7 +272,9 @@ def get_status():
             "research_epoch": 1,
             "research_day": research_day,
             "broker": getattr(config, 'BROKER', "Unknown"),
-            "dataset_certification": dataset_cert
+            "dataset_certification": dataset_cert,
+            "os_platform": platform.system(),
+            "python_version": platform.python_version()
         }
     }
     return jsonify(payload)

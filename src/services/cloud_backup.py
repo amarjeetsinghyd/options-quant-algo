@@ -191,12 +191,10 @@ def run_scheduler():
     
     stop_event = threading.Event()
     
-    def handle_shutdown(signum, frame):
+    def handle_shutdown():
         logger.info("Cloud backup received shutdown signal.")
         stop_event.set()
-        
-    signal.signal(signal.SIGINT, handle_shutdown)
-    signal.signal(signal.SIGTERM, handle_shutdown)
+
 
     # Run once on boot
     run_backup()

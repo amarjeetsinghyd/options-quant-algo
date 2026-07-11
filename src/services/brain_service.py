@@ -175,6 +175,12 @@ class BrainService:
                 # Keep only last 2 days of trading data (~750 minutes)
                 boot_df = boot_df.tail(750).reset_index(drop=True)
                 
+                # 1GB Memory Optimization: Downcast 64-bit to 32-bit types
+                fcols = boot_df.select_dtypes('float').columns
+                icols = boot_df.select_dtypes('integer').columns
+                boot_df[fcols] = boot_df[fcols].astype('float32')
+                boot_df[icols] = boot_df[icols].astype('int32')
+                
                 logger.info(f"=== BOOT: Loaded {len(boot_df)} historical rows from local disk ===")
                 
                 self.cached_volume_df = boot_df.set_index('timestamp')[['synth_vol']]
@@ -1074,7 +1080,7 @@ class BrainService:
                                 pass
                             self.subscribed_options_set.add(t)
 
-            time.sleep(2)
+            time.sleep(5)
 
     def start(self):
         logger.info("=== STARTING BRAIN SERVICE ===")

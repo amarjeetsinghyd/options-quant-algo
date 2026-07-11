@@ -2,7 +2,7 @@ module.exports = {
   apps: [{
     name: "quant-engine",
     script: "start_all.py",
-    interpreter: "venv/bin/python",
+    interpreter: "python3",
     watch: false,
     autorestart: true,
     max_restarts: 10,

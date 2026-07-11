@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 
-@dataclass(slots=True)
+@dataclass()
 class BrokerRuntime:
     # Session information
     session_active: bool = False

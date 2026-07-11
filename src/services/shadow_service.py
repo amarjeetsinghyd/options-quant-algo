@@ -7,9 +7,6 @@ try:
 except ImportError:
     ENABLE_SHADOW_SERVICE = False
 
-if not ENABLE_SHADOW_SERVICE:
-    print("[shadow_service] DISABLED via engineering_config.ENABLE_SHADOW_SERVICE — exiting.")
-    _sys.exit(0)
 
 import time
 import threading

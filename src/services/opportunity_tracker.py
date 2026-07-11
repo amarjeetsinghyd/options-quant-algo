@@ -73,13 +73,12 @@ class OpportunityTracker:
                         data["lowest_price"] = ltp
                         
     def on_decision(self, topic, payload):
-        EXEC.DECISION= payload
-        sig_id = EXEC.DECISIONget("EXEC.DECISIONuuid")
+        sig_id = payload.get("uuid")
         if not sig_id:
             return
             
-        token = EXEC.DECISIONget("token")
-        price = EXEC.DECISIONget("strike_price") or EXEC.DECISIONget("underlying_price")
+        token = payload.get("token")
+        price = payload.get("strike_price") or payload.get("underlying_price")
         if not token or not price:
             return
             
@@ -88,15 +87,15 @@ class OpportunityTracker:
             self.active_signals[sig_id] = {
                 "uuid": sig_id,
                 "token": str(token),
-                "status": EXEC.DECISIONget("status", "REJECTED"),
-                "strategy": EXEC.DECISIONget("strategy", "UNKNOWN"),
+                "status": payload.get("status", "REJECTED"),
+                "strategy": payload.get("strategy", "UNKNOWN"),
                 "entry_price": float(price),
                 "highest_price": float(price),
                 "lowest_price": float(price),
                 "start_time": time.time(),
-                "human_reason": EXEC.DECISIONget("human_reason", "")
+                "human_reason": payload.get("human_reason", "")
             }
-        logger.info(f"[Tracker] Registered new signal {sig_id} ({EXEC.DECISIONget('status')}) for 60-min observation.")
+        logger.info(f"[Tracker] Registered new signal {sig_id} ({payload.get('status')}) for 60-min observation.")
 
     def _cleanup_loop(self):
         while not self.stop_event.is_set():
@@ -137,7 +136,7 @@ class OpportunityTracker:
     def start(self):
         logger.info("=== STARTING UNIFIED OPPORTUNITY TRACKER ===")
         threading.Thread(target=self.feed_sub.listen, args=(self.on_feed_tick,), daemon=True).start()
-        threading.Thread(target=self.intel_sub.listen, args=(self.on_EXEC.DECISION), daemon=True).start()
+        threading.Thread(target=self.intel_sub.listen, args=(self.on_decision,), daemon=True).start()
         threading.Thread(target=self._cleanup_loop, daemon=True).start()
         
         try:

@@ -748,6 +748,17 @@ function updateUI(data) {
         document.getElementById('stats-confidence').innerText = sysInfo.dataset_certification === 'Certified' ? '100.00%' : '98.9%';
     }
 
+    // UPDATE BUILD INFO PANEL
+    if (document.getElementById('build-engine')) {
+        document.getElementById('build-engine').innerText = sysInfo.engine_version || 'v1.1.0';
+        document.getElementById('build-git').innerText = sysInfo.git_commit || 'unknown';
+        document.getElementById('build-broker').innerText = sysInfo.broker || 'Unknown';
+        document.getElementById('build-epoch').innerText = sysInfo.research_epoch || '1';
+        document.getElementById('build-schema').innerText = summary.schema_version || '2.0.0';
+        document.getElementById('build-platform').innerText = sysInfo.os_platform || 'Unknown';
+        document.getElementById('build-python').innerText = sysInfo.python_version || 'Unknown';
+    }
+
     // Diagnostics / Validation Checklist
     const runtimeList = document.getElementById('runtime-checklist');
     if (runtimeList) {

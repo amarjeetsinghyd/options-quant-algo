@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class UniversalInstrument:
     """Immutable representation of a tradable instrument.
 

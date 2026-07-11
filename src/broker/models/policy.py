@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Tuple
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class BrokerPolicy:
     """Lightweight policy governing broker interactions.
 
