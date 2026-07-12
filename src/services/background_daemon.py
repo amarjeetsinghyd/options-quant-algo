@@ -54,7 +54,6 @@ class BackgroundDaemon:
             ("PassiveHealthMonitor", self.health_monitor.start),
             ("DecisionJournal", self.decision_journal.start),
             ("MaintenanceService", self.maintenance_service.run),
-            ("CloudBackupScheduler", run_cloud_backup),
             ("OpportunityTracker", self.opportunity_tracker.start)
         ]
 
@@ -70,7 +69,7 @@ class BackgroundDaemon:
         # Keep the main thread alive so daemon threads don't instantly exit
         try:
             while True:
-                time.sleep(10)
+                time.sleep(60) # Extreme survival mode: Wake up only once a minute
         except KeyboardInterrupt:
             logger.info("Background Daemon shutting down...")
 

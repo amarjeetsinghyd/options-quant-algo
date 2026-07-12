@@ -40,12 +40,33 @@ def main():
         print(f"Error accessing target process: {e}")
         return
         
-    # Trigger Shutdown
+    # Trigger Shutdown via file flag
     mgr = ShutdownManager(runtime_dir=str(BASE_DIR / "runtime"))
     print(f"Sending shutdown trigger to process {target_pid}...")
     mgr.request_shutdown()
     
-    # Poll for termination
+    # Try PM2 stop first (if PM2 is managing the process)
+    import subprocess
+    try:
+        print("Attempting to stop via PM2 (if applicable)...")
+        # Use shell=True for windows compat if needed, but pm2 is usually in path
+        # On Linux, pm2 is usually a global npm package
+        result = subprocess.run(
+            "pm2 stop quant-engine", 
+            shell=True, capture_output=True, text=True
+        )
+        if result.returncode == 0 and "quant-engine" in result.stdout:
+            print("PM2 successfully intercepted and stopped the engine.")
+            mgr.clear_shutdown_trigger()
+            try:
+                if PID_FILE.exists():
+                    PID_FILE.unlink()
+            except: pass
+            return
+    except Exception as e:
+        print(f"PM2 stop skipped or failed: {e}")
+    
+    # Poll for termination (Fallback for local/non-PM2 execution)
     max_wait = 15.0
     wait_interval = 0.5
     waited = 0.0

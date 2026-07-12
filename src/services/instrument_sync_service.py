@@ -85,27 +85,51 @@ class InstrumentSyncService:
             return False, str(e)
 
     def sync_shoonya(self, force: bool = False) -> Tuple[bool, str]:
-        """Mock/sync Shoonya instruments since SDK is not yet integrated."""
+        """Download and sync Shoonya instruments from NSE and NFO."""
+        import zipfile
+        import io
+        import csv
         logger.info("Starting Shoonya instrument synchronization...")
         try:
-            # We mock the Shoonya master file structure
-            mock_records = [
-                {"Exchange": "NSE", "Token": "22", "Symbol": "ACC", "TradingSymbol": "ACC-EQ", "LotSize": "1", "Instrument": "EQUITY", "TickSize": "0.05"},
-                {"Exchange": "NSE", "Token": "1594", "Symbol": "INFY", "TradingSymbol": "INFY-EQ", "LotSize": "1", "Instrument": "EQUITY", "TickSize": "0.05"},
-                {"Exchange": "NSE", "Token": "26000", "Symbol": "NIFTY", "TradingSymbol": "Nifty 50", "LotSize": "1", "Instrument": "INDEX", "TickSize": "0.05"},
-                {"Exchange": "NFO", "Token": "35001", "Symbol": "NIFTY", "TradingSymbol": "NIFTY26JUL26FUT", "LotSize": "75", "Expiry": "26-JUL-2026", "Instrument": "FUTIDX", "TickSize": "0.05"},
-                {"Exchange": "NFO", "Token": "35002", "Symbol": "NIFTY", "TradingSymbol": "NIFTY26JUL2624000CE", "LotSize": "75", "Expiry": "26-JUL-2026", "StrikePrice": "24000", "OptionType": "CE", "Instrument": "OPTIDX", "TickSize": "0.05"}
-            ]
+            urls = {
+                "NSE": "https://api.shoonya.com/NSE_symbols.txt.zip",
+                "NFO": "https://api.shoonya.com/NFO_symbols.txt.zip",
+                "BFO": "https://api.shoonya.com/BFO_symbols.txt.zip"
+            }
+            all_records = []
+            combined_hash = ""
             
-            content_bytes = json.dumps(mock_records).encode("utf-8")
-            current_hash = self._compute_hash(content_bytes)
+            for exch, url in urls.items():
+                logger.info(f"Downloading {exch} from {url}...")
+                response = requests.get(url, timeout=60)
+                if response.status_code != 200:
+                    logger.error(f"Failed to fetch Shoonya {exch} master. Status: {response.status_code}")
+                    continue
+                
+                content = response.content
+                combined_hash += self._compute_hash(content)
+                
+                with zipfile.ZipFile(io.BytesIO(content)) as z:
+                    for filename in z.namelist():
+                        if filename.endswith(".txt") or filename.endswith(".csv"):
+                            with z.open(filename) as f:
+                                decoded_content = f.read().decode('utf-8-sig').splitlines()
+                                reader = csv.DictReader(decoded_content)
+                                for row in reader:
+                                    all_records.append(row)
+                                    
+            if not all_records:
+                return False, "No records fetched"
+                
+            current_hash = self._compute_hash(combined_hash.encode('utf-8'))
             
             last_hash = self.repo.get_sync_hash("SHOONYA")
             if current_hash == last_hash and not force:
-                logger.info("Shoonya master file is unchanged. Skipping sync.")
+                logger.info("Shoonya master files are unchanged. Skipping sync.")
                 return True, "Unchanged"
                 
-            normalized_instruments = self.shoonya_normalizer.normalize(mock_records)
+            logger.info(f"Normalizing {len(all_records)} Shoonya records...")
+            normalized_instruments = self.shoonya_normalizer.normalize(all_records)
             
             mappings = []
             for inst in normalized_instruments:
@@ -137,9 +161,6 @@ class InstrumentSyncService:
     def run_sync_all(self, force: bool = False) -> None:
         """Run synchronization for all active brokers."""
         logger.info("=== STARTING FULL INSTRUMENT REGISTRY SYNCHRONIZATION ===")
-        
-        # Sync Angel One
-        self.sync_angel(force=force)
         
         # Sync Shoonya
         self.sync_shoonya(force=force)

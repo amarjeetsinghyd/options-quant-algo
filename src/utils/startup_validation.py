@@ -79,7 +79,7 @@ def run_startup_validation(base_dir: Path) -> dict:
         overall_status = "FAIL"
 
     # 6. Broker Connection Config
-    broker_keys = ["ANGEL_API_KEY", "ANGEL_CLIENT_ID", "ANGEL_PASSWORD", "ANGEL_TOTP_SECRET"]
+    broker_keys = ["SHOONYA_USER_ID", "SHOONYA_PASSWORD", "SHOONYA_API_KEY"]
     has_credentials = True
     for key in broker_keys:
         if not os.environ.get(key) and not os.getenv(key):

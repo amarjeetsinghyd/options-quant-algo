@@ -4,7 +4,6 @@ import csv
 import json
 from datetime import datetime, timedelta
 import pandas as pd
-from src.utils.charting import generate_trade_chart
 from src.utils.logger import get_logger
 from src.core.decision_lifecycle import DecisionLifecycle
 from src.execution.capital_engine import CapitalEngine

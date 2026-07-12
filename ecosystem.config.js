@@ -8,6 +8,7 @@ module.exports = {
     max_restarts: 10,
     restart_delay: 5000,
     time: true,
+    kill_timeout: 15000,
     env: {
       POLARS_IGNORE_TIMEZONE_PARSE_ERROR: "1"
     }

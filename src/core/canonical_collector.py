@@ -219,7 +219,7 @@ class CanonicalCollector:
             b"schema_version": b"v3.1",
             b"snapshot_version": b"v1.0",
             b"collector_version": b"v1.0",
-            b"feed_version": b"AngelOne_SmartConnect_v3",
+            b"feed_version": b"Shoonya_API_v1",
             b"exchange_name": b"NSE/NFO",
             b"timezone": b"Asia/Kolkata",
             b"observation_interval": b"60",

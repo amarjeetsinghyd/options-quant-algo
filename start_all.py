@@ -255,7 +255,7 @@ class LifecycleManager:
             validation["runtime_folder"] = "FAIL"
             
         # 4. Broker Connectivity Config
-        env_keys = ["ANGEL_API_KEY", "ANGEL_CLIENT_ID", "ANGEL_PASSWORD", "ANGEL_TOTP_SECRET"]
+        env_keys = ["SHOONYA_USER_ID", "SHOONYA_PASSWORD", "SHOONYA_API_KEY"] # Assuming Shoonya is active
         has_creds = all(os.environ.get(k) or os.getenv(k) for k in env_keys)
         validation["broker_connectivity"] = "PASS" if has_creds else "WARNING"
         

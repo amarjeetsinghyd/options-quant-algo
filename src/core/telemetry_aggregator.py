@@ -258,7 +258,7 @@ class RuntimeTelemetryAggregator:
                 write_envelope_json_atomic(self.snapshot_file, snapshot_copy)
             except Exception as e:
                 logger.error(f"Error persisting QOT snapshot: {e}")
-            time.sleep(2)
+            time.sleep(10) # Reduced from 2s to 10s to heavily save CPU and Disk I/O
 
     def stop(self):
         """Stops ZMQ listener and writer threads gracefully."""

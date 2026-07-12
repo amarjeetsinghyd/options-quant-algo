@@ -2,6 +2,7 @@ import os
 import sqlite3
 import json
 from datetime import datetime
+import contextlib
 from typing import Dict, List, Optional, Any, Tuple
 from src.config.engineering_config import DATA_DIR
 from src.utils.logger import get_logger
@@ -22,12 +23,19 @@ class InstrumentRepository:
             cls._instance._init_db()
         return cls._instance
 
-    def _get_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(DB_PATH)
+    @contextlib.contextmanager
+    def _get_connection(self):
+        conn = sqlite3.connect(DB_PATH, timeout=60.0)
         conn.row_factory = sqlite3.Row
-        # Enable foreign key support
+        # Enable WAL mode and foreign keys
+        conn.execute("PRAGMA journal_mode = WAL;")
+        conn.execute("PRAGMA synchronous = NORMAL;")
         conn.execute("PRAGMA foreign_keys = ON;")
-        return conn
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     def _init_db(self) -> None:
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)

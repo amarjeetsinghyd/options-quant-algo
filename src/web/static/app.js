@@ -96,7 +96,7 @@ function adjustPollingInterval() {
     const timeVal = hour * 60 + min;
     const isMarketOpen = isWeekday && (timeVal >= (9 * 60 + 15) && timeVal <= (15 * 60 + 30));
     
-    const newInterval = isMarketOpen ? 5000 : 30000;
+    const newInterval = isMarketOpen ? 15000 : 60000; // Extreme survival mode: 15s during market, 60s off-market
     
     if (newInterval !== currentPollInterval) {
         console.log(`Smart Polling: Adjusting interval from ${currentPollInterval/1000}s to ${newInterval/1000}s.`);

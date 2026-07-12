@@ -559,12 +559,14 @@ class BrainService:
                             live_vol = sum(self.current_minute_volume_tracker.values())
                             
                             if not (price_df['timestamp'] == live_ts).any():
-                                live_row = pd.DataFrame({
-                                    'timestamp': [live_ts], 'open': [self.live_open if self.live_open else self.live_ltp],
-                                    'high': [self.live_high if self.live_high else self.live_ltp], 'low': [self.live_low if self.live_low else self.live_ltp],
-                                    'close': [self.live_ltp], 'volume': [live_vol]
-                                })
-                                price_df = pd.concat([price_df, live_row], ignore_index=True)
+                                price_df.loc[len(price_df)] = {
+                                    'timestamp': live_ts,
+                                    'open': self.live_open if self.live_open else self.live_ltp,
+                                    'high': self.live_high if self.live_high else self.live_ltp,
+                                    'low': self.live_low if self.live_low else self.live_ltp,
+                                    'close': self.live_ltp,
+                                    'volume': live_vol
+                                }
                             else:
                                 idx = price_df[price_df['timestamp'] == live_ts].index[-1]
                                 price_df.at[idx, 'close'] = self.live_ltp
