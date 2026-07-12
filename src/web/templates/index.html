@@ -730,7 +730,19 @@
 
             <!-- SECTION: Shadow Tracking / Opportunity Cost Chart -->
             <div class="card flat-panel mt-3" id="opportunity-cost-panel" style="height: 300px; padding: 20px;">
-                <h3 style="margin-top:0;">OPPORTUNITY COST: Max Favorable Excursion (Accepted vs Rejected)</h3>
+                <h3 style="margin-top:0; display: flex; justify-content: space-between; align-items: center;">
+                    OPPORTUNITY COST: Max Favorable Excursion (Accepted vs Rejected)
+                    <div style="display: flex; gap: 15px; font-size: 11px; font-weight: normal; font-family: var(--font-mono);">
+                        <span style="display: flex; align-items: center; gap: 5px;">
+                            <div style="width: 12px; height: 12px; background-color: rgba(76, 175, 80, 0.8); border: 1px solid #4CAF50;"></div> 
+                            Accepted (Conditions Met)
+                        </span>
+                        <span style="display: flex; align-items: center; gap: 5px;">
+                            <div style="width: 12px; height: 12px; background-color: rgba(244, 67, 54, 0.8); border: 1px solid #F44336;"></div> 
+                            Rejected (Missed Opportunities)
+                        </span>
+                    </div>
+                </h3>
                 <div style="position: relative; width: 100%; height: 230px;">
                     <canvas id="chart-mfe-canvas" style="position:absolute; top:0; left:0; width:100%; height:100%;"></canvas>
                 </div>
