@@ -46,6 +46,11 @@ class ShoonyaSessionProvider(ISessionProvider):
     def __init__(self, api: NorenApiPy) -> None:
         self.logger = logger
         self._api = api
+        
+        from dotenv import load_dotenv
+        env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), ".env")
+        load_dotenv(dotenv_path=env_path)
+        
         self.client_id = os.getenv("SHOONYA_CLIENT_ID", "")
         self.client_secret = os.getenv("SHOONYA_CLIENT_SECRET", "")
         self.userid = os.getenv("SHOONYA_USERNAME", "")
@@ -62,8 +67,14 @@ class ShoonyaSessionProvider(ISessionProvider):
                     data = json.load(f)
                     if data.get("userid") == self.userid and data.get("susertoken"):
                         self.susertoken = data["susertoken"]
-                        # Use set_session on SDK
-                        self._api.set_session(self.userid, self.password, self.susertoken)
+                        actid = data.get("actid", self.userid)  # fallback to userid if missing
+                        # CRITICAL: OAuth API requires injectOAuthHeader (Bearer token), NOT set_session.
+                        # set_session() only sets the old password-auth susertoken and never populates
+                        # __OAuthHeaders, so all OAuth API calls fail with 'Invalid Session Key'.
+                        # HOWEVER, start_websocket NEEDS self.__access_token, which is only set by set_session!
+                        # We must call BOTH to satisfy REST and WebSocket endpoints!
+                        self._api.set_session(self.userid, self.password, self.susertoken, self.susertoken)
+                        self._api.injectOAuthHeader(self.susertoken, self.userid, actid)
                         # Validate the session with a lightweight call
                         limits = self._api.get_limits()
                         if isinstance(limits, dict) and limits.get("stat") != "Not_Ok":
@@ -94,19 +105,33 @@ class ShoonyaSessionProvider(ISessionProvider):
             )
             
             limiter = TokenBucketLimiter(per_second=1, name="shoonya_oauth")
-            self.susertoken = call_with_retry(
+            auth_code = call_with_retry(
                 lambda: oauth_provider.authenticate(),
                 limiter=limiter
             )
             
-            if self.susertoken:
-                self._api.set_session(self.userid, self.password, self.susertoken)
-                os.makedirs(os.path.dirname(SESSION_FILE), exist_ok=True)
-                with open(SESSION_FILE, "w") as f:
-                    json.dump({"userid": self.userid, "susertoken": self.susertoken, "updated_at": time.time()}, f)
-                self.logger.info(f"Shoonya OAuth login successful for {self.userid}")
+            if auth_code:
+                result = self._api.getAccessToken(auth_code, self.client_secret, self.client_id, self.userid)
+                if result is not None:
+                    acc_tok, usrid, ref_tok, actid = result
+                    self.susertoken = acc_tok
+                    self.logger.info("Shoonya getAccessToken successful.")
+                    # getAccessToken calls injectOAuthHeader internally for REST, but does NOT set __access_token
+                    # which is required for the WebSocket. We must call set_session.
+                    self._api.set_session(self.userid, self.password, self.susertoken, self.susertoken)
+                    os.makedirs(os.path.dirname(SESSION_FILE), exist_ok=True)
+                    with open(SESSION_FILE, "w") as f:
+                        json.dump({
+                            "userid": self.userid,
+                            "susertoken": self.susertoken,
+                            "actid": actid,
+                            "updated_at": time.time()
+                        }, f)
+                    self.logger.info(f"Shoonya OAuth login successful for {self.userid}")
+                else:
+                    self.logger.error("Failed to retrieve access token via getAccessToken")
             else:
-                self.logger.error(f"Shoonya OAuth login returned empty token")
+                self.logger.error("Shoonya OAuth login failed: No auth code returned")
 
         except Exception as e:
             self.logger.error(f"Exception during Shoonya login: {e}")
@@ -160,13 +185,26 @@ class ShoonyaMarketDataProvider(IMarketDataProvider):
                 token = message.get("tk")
                 if not token:
                     return
+                # Calculate delta volume (ltq) since Shoonya may only send total volume 'v'
+                v_total = int(message.get("v", 0) or 0)
+                ltq = int(message.get("ltq", 0) or 0)
+                if ltq == 0 and v_total > 0:
+                    if not hasattr(self, "_last_vol"):
+                        self._last_vol = {}
+                    
+                    prev_v = self._last_vol.get(token, 0)
+                    if prev_v > 0 and v_total > prev_v:
+                        ltq = v_total - prev_v
+                    
+                    self._last_vol[token] = v_total
+
                 # Map Shoonya's payload to the standardized TickData format
                 std_msg = {
                     "token": str(token),
                     "exchange": message.get("e", "NSE"),
                     "last_traded_price": float(message.get("lp", 0) or 0),
-                    "last_traded_quantity": int(message.get("ltq", 0) or 0),
-                    "volume_trade_for_the_day": int(message.get("v", 0) or 0),
+                    "last_traded_quantity": int(ltq),
+                    "volume_trade_for_the_day": int(v_total),
                     "average_traded_price": float(message.get("ap", 0) or 0),
                     "open": float(message.get("o", 0) or 0),
                     "high": float(message.get("h", 0) or 0),
@@ -174,6 +212,13 @@ class ShoonyaMarketDataProvider(IMarketDataProvider):
                     "close": float(message.get("c", 0) or 0),
                     "percent_change": float(message.get("pc", 0) or 0),
                 }
+                
+                # Add Best Bid/Ask in standard fields
+                if "bp1" in message:
+                    std_msg["bid"] = float(message["bp1"])
+                if "sp1" in message:
+                    std_msg["ask"] = float(message["sp1"])
+
                 # Remove zero values where we might not have received a full tick yet
                 std_msg = {k: v for k, v in std_msg.items() if v != 0 or k in ["last_traded_price"]}
                 on_tick_callback(std_msg)
@@ -204,13 +249,14 @@ class ShoonyaMarketDataProvider(IMarketDataProvider):
         """Translates generic tokens into Shoonya format and subscribes."""
         if not tokens: return
         shoonya_tokens = [f"{exchange}|{t}" for t in tokens]
-        self._api.subscribe(shoonya_tokens)
+        # Subscribe with feed_type='d' (depth) to get bid/ask fields (bp1, sp1)
+        self._api.subscribe(shoonya_tokens, feed_type='d')
         
     def unsubscribe(self, tokens: list, exchange: str) -> None:
         """Translates generic tokens into Shoonya format and unsubscribes."""
         if not tokens: return
         shoonya_tokens = [f"{exchange}|{t}" for t in tokens]
-        self._api.unsubscribe(shoonya_tokens)
+        self._api.unsubscribe(shoonya_tokens, feed_type='d')
     def get_quote(self, exchange: str, token: str) -> dict:
         """Fetch the latest snapshot quote for a given token."""
         try:
@@ -269,23 +315,38 @@ class ShoonyaOrderLifecycle(OrderLifecycle):
     def execute_entry(self, leg: TradeLeg) -> bool:
         logger.info(f"[ShoonyaOrderLifecycle] Initiating Entry for {leg.symbol} (Qty: {leg.quantity})")
         try:
-            buy_or_sell = "B" # Assuming Entry is Buy for our option strategy
+            # Fetch fresh LTP for marketable limit order
+            ltp = float(leg.entry_price or 0.0)
+            try:
+                quote = self.exec_provider._api.get_quotes(exchange="NFO", token=leg.token)
+                if quote and "lp" in quote:
+                    ltp = float(quote["lp"])
+            except Exception as e:
+                logger.warning(f"[ShoonyaOrderLifecycle] Could not fetch fresh LTP, using entry_price: {e}")
+
+            if ltp <= 0:
+                logger.error("[ShoonyaOrderLifecycle] Invalid LTP for entry.")
+                return False
+
+            buffer = max(0.5, ltp * 0.015)
+            limit_price = round((ltp + buffer) / 0.05) * 0.05
+
             resp = self.exec_provider.place_order(
-                buy_or_sell=buy_or_sell,
-                product_type="I", # Intraday
+                buy_or_sell="B",
+                product_type="I",
                 exchange="NFO",
                 tradingsymbol=leg.symbol,
                 quantity=leg.quantity,
                 discloseqty=0,
-                price_type="MKT",
-                price=0,
+                price_type="LMT",
+                price=limit_price,
                 retention="DAY"
             )
             
             if resp and resp.get("stat") == "Ok":
                 leg.broker_order_id = resp.get("norenordno")
                 leg.status = "OPEN"
-                logger.info(f"[ShoonyaOrderLifecycle] Entry Placed. OrderNo: {leg.broker_order_id}")
+                logger.info(f"[ShoonyaOrderLifecycle] Entry Placed. OrderNo: {leg.broker_order_id} at Limit: {limit_price}")
                 return True
             else:
                 logger.error(f"[ShoonyaOrderLifecycle] Entry Failed: {resp}")
@@ -294,41 +355,105 @@ class ShoonyaOrderLifecycle(OrderLifecycle):
             logger.error(f"[ShoonyaOrderLifecycle] Exception during entry: {e}")
             return False
 
-    def execute_exit(self, leg: TradeLeg, reason: str, exit_price=None) -> bool:
+    def place_sl_order(self, leg: TradeLeg, sl_trigger: float, sl_limit: float) -> str:
+        """Places the initial SL-LMT order."""
+        try:
+            sl_trigger = round(sl_trigger / 0.05) * 0.05
+            sl_limit = round(sl_limit / 0.05) * 0.05
+            logger.info(f"[ShoonyaOrderLifecycle] Placing SL order for {leg.symbol}. Trigger: {sl_trigger}, Limit: {sl_limit}")
+            
+            resp = self.exec_provider.place_order(
+                buy_or_sell="S",
+                product_type="I",
+                exchange="NFO",
+                tradingsymbol=leg.symbol,
+                quantity=leg.quantity,
+                discloseqty=0,
+                price_type="SL-LMT",
+                price=sl_limit,
+                trigger_price=sl_trigger,
+                retention="DAY"
+            )
+            if resp and resp.get("stat") == "Ok":
+                return resp.get("norenordno")
+            else:
+                logger.error(f"[ShoonyaOrderLifecycle] SL placement failed: {resp}")
+                return None
+        except Exception as e:
+            logger.error(f"[ShoonyaOrderLifecycle] Exception placing SL: {e}")
+            return None
+
+    def modify_sl_order(self, leg: TradeLeg, sl_orderno: str, new_trigger: float, new_limit: float) -> bool:
+        """Modifies an existing SL-LMT order."""
+        try:
+            new_trigger = round(new_trigger / 0.05) * 0.05
+            new_limit = round(new_limit / 0.05) * 0.05
+            logger.info(f"[ShoonyaOrderLifecycle] Modifying SL order {sl_orderno} to Trigger: {new_trigger}")
+            
+            resp = self.exec_provider.modify_order(
+                orderno=sl_orderno,
+                exchange="NFO",
+                tradingsymbol=leg.symbol,
+                newquantity=leg.quantity,
+                newprice_type="SL-LMT",
+                newprice=new_limit,
+                newtrigger_price=new_trigger
+            )
+            return resp and resp.get("stat", "").lower() == "ok"
+        except Exception as e:
+            logger.error(f"[ShoonyaOrderLifecycle] Exception modifying SL: {e}")
+            return False
+
+    def execute_exit(self, leg: TradeLeg, reason: str, exit_price=None, pending_sl_orderno=None) -> bool:
         logger.info(f"[ShoonyaOrderLifecycle] Initiating Exit for {leg.symbol}. Reason: {reason}")
         try:
-            # Check for pending limit order in Order Book
-            order_book = self.exec_provider.get_order_book()
-            pending_orderno = None
+            ltp = float(exit_price or leg.current_price or 0.0)
+            buffer = max(0.5, ltp * 0.015)
+            limit_price = round((ltp - buffer) / 0.05) * 0.05
             
-            for o in order_book:
-                if isinstance(o, dict) and o.get("tsym") == leg.symbol and o.get("status") in ["OPEN", "TRIGGER PENDING", "PENDING"]:
-                    pending_orderno = o.get("norenordno")
-                    break
-                    
-            if pending_orderno:
-                logger.info(f"[ShoonyaOrderLifecycle] Found Pending Order {pending_orderno}. Modifying to MKT.")
+            if pending_sl_orderno:
+                logger.info(f"[ShoonyaOrderLifecycle] Modifying SL order {pending_sl_orderno} to marketable Limit.")
                 resp = self.exec_provider.modify_order(
-                    orderno=pending_orderno,
+                    orderno=pending_sl_orderno,
                     exchange="NFO",
                     tradingsymbol=leg.symbol,
-                    newquantity=leg.quantity, # Total Qty is required by Shoonya
-                    newprice_type="MKT",
-                    newprice=0.0
+                    newquantity=leg.quantity,
+                    newprice_type="LMT",
+                    newprice=limit_price
                 )
             else:
-                logger.info(f"[ShoonyaOrderLifecycle] No pending order found. Placing new MKT Sell order.")
-                resp = self.exec_provider.place_order(
-                    buy_or_sell="S",
-                    product_type="I",
-                    exchange="NFO",
-                    tradingsymbol=leg.symbol,
-                    quantity=leg.quantity,
-                    discloseqty=0,
-                    price_type="MKT",
-                    price=0,
-                    retention="DAY"
-                )
+                # Check for pending limit order in Order Book if sl_orderno not provided
+                order_book = self.exec_provider.get_order_book()
+                pending_orderno = None
+                
+                for o in order_book:
+                    if isinstance(o, dict) and o.get("tsym") == leg.symbol and o.get("status") in ["OPEN", "TRIGGER PENDING", "PENDING"]:
+                        pending_orderno = o.get("norenordno")
+                        break
+                        
+                if pending_orderno:
+                    logger.info(f"[ShoonyaOrderLifecycle] Found Pending Order {pending_orderno}. Modifying to LMT.")
+                    resp = self.exec_provider.modify_order(
+                        orderno=pending_orderno,
+                        exchange="NFO",
+                        tradingsymbol=leg.symbol,
+                        newquantity=leg.quantity,
+                        newprice_type="LMT",
+                        newprice=limit_price
+                    )
+                else:
+                    logger.info(f"[ShoonyaOrderLifecycle] No pending order found. Placing new LMT Sell order.")
+                    resp = self.exec_provider.place_order(
+                        buy_or_sell="S",
+                        product_type="I",
+                        exchange="NFO",
+                        tradingsymbol=leg.symbol,
+                        quantity=leg.quantity,
+                        discloseqty=0,
+                        price_type="LMT",
+                        price=limit_price,
+                        retention="DAY"
+                    )
                 
             if resp and resp.get("stat", "").lower() == "ok":
                 leg.close_leg(exit_price or leg.current_price, reason)
@@ -431,7 +556,7 @@ class ShoonyaHistoricalProvider(IHistoricalProvider):
 
 class ShoonyaAdapter(IBrokerGateway):
     def __init__(self) -> None:
-        self._api = NorenApiPy()
+        self._api = NorenApiPy(host='https://api.shoonya.com/NorenWClientAPI/', websocket='wss://api.shoonya.com/NorenWSAPI/')
         
         self._session_provider = ShoonyaSessionProvider(self._api)
         self._market_data_provider = ShoonyaMarketDataProvider(self._api)

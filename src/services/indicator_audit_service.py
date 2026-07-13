@@ -59,8 +59,8 @@ class IndicatorAuditService:
         AUDIT_DIR.mkdir(parents=True, exist_ok=True)
         try:
             broker = get_broker_adapter()
-            self.api = getattr(broker, "api", None)
-            self.fetcher = DataFetcher(self.api)
+            # Pass the full broker gateway — DataFetcher is broker-agnostic
+            self.fetcher = DataFetcher(broker)
         except Exception as e:
             logger.warning(f"Could not initialize broker adapter for audit: {e}")
             self.fetcher = None

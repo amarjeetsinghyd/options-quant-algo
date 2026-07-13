@@ -258,39 +258,31 @@ class ExecutionManager:
             
         name, exch_seg = self.data_fetcher.get_active_instrument()
         
-        # Update live prices for all open legs
+        # 1. Update live prices and highest prices for all open legs
         for leg in self.trade_context.legs:
             if leg.status == "OPEN":
                 try:
                     res = self.broker.market_data_provider.get_quote(exch_seg, leg.token)
                     if res and res.get('ltp', 0.0) > 0:
                         leg.current_price = res['ltp']
+                        if leg.current_price > leg.highest_price:
+                            leg.highest_price = leg.current_price
                 except:
                     pass
-
-        # Calculate PnL
-        total_pnl = sum((leg.current_price - leg.entry_price) * leg.quantity * self.get_instrument_params()["lot_size"] for leg in self.trade_context.legs if leg.status == "OPEN")
-        capital_used = sum((leg.entry_price) * leg.quantity * self.get_instrument_params()["lot_size"] for leg in self.trade_context.legs if leg.status == "OPEN")
         
-        # 1. Target Check
-        if capital_used > 0 and (total_pnl / capital_used) >= 0.10: # 10% Target
-            self._close_all_legs(current_nifty_df, "10% TARGET HIT")
-            return
-            
-        # 2. Time Stop (3 mins)
+        # 2. Hard Cap Check (300 seconds)
         duration = (datetime.now() - self.trade_context.entry_time).total_seconds()
-        if duration >= 180:
-            self._close_all_legs(current_nifty_df, "Gamma Stall Abort")
+        if duration >= 300:
+            self._close_all_legs(current_nifty_df, "Hard Cap (5 Mins) Reached")
             return
             
-        # 3. Candle SL Check
+        # 3. Candle SL Check (Strictly at Candle Close)
         now = datetime.now()
         closed_candles = current_nifty_df[current_nifty_df['timestamp'].dt.floor('min') < pd.Timestamp(now).floor('min')]
         if not closed_candles.empty:
             last_closed = closed_candles.iloc[-1]
             ema_9 = float(last_closed['ema_9'])
             vwap = float(last_closed['vwap'])
-            close_price = float(last_closed['close'])
             
             strat = self.trade_context.strategy
             if strat == 'WINDOW_ALIGNMENT':
@@ -300,17 +292,100 @@ class ExecutionManager:
                 elif self.trade_context.signal_type == "PUT" and ema_9 > vwap:
                     self._close_all_legs(current_nifty_df, "CANDLE SL: 9 EMA Closed Above VWAP")
                     return
+                    
+        # 4. Tick-Driven Dynamic Exit System (Per Leg)
+        current_time = time.time()
+        for leg in self.trade_context.legs:
+            if leg.status != "OPEN":
+                continue
+                
+            entry = leg.entry_price
+            current = leg.current_price
+            highest = leg.highest_price
+            
+            profit_pct = (current - entry) / entry if entry > 0 else 0
+            hwm_pct = (highest - entry) / entry if entry > 0 else 0
+            
+            target_sl_price = 0.0
+            
+            # Phase 2: Aggressive Uncapped HWM Trailing (> 15% Profit)
+            if hwm_pct > 0.15:
+                if hwm_pct > 1.50:
+                    target_sl_price = highest * (1.0 - 0.20)  # Trail gap at 20%
+                elif hwm_pct > 0.50:
+                    target_sl_price = highest * (1.0 - 0.15)  # Trail gap at 15%
+                else:
+                    target_sl_price = highest * (1.0 - 0.10)  # Trail gap at 10%
+            # Phase 1: Conservative Risk Management (0% to 15% Profit)
+            else:
+                if hwm_pct > 0.10:
+                    target_sl_price = entry * 1.05  # SL to +5%
+                elif hwm_pct > 0.07:
+                    target_sl_price = entry * 1.0   # SL to Breakeven
+                
+                # Theta Check (3 minutes elapsed and profit 0-5%)
+                if duration >= 180 and 0.0 <= profit_pct <= 0.05:
+                    self._close_all_legs(current_nifty_df, "Theta Decay Abort (0-5% after 3 mins)")
+                    return
+                    
+            # Default 20% initial SL if not trailing yet
+            if target_sl_price == 0.0:
+                target_sl_price = entry * 0.80
+
+            # Ensure SL only moves UP (trailing)
+            if target_sl_price > leg.sl_trigger_price:
+                leg.sl_trigger_price = target_sl_price
+                
+            # Immediate local exit check in case SL didn't fill in broker
+            if current <= leg.sl_trigger_price and leg.sl_trigger_price > 0:
+                self._close_all_legs(current_nifty_df, f"Trailing SL Hit at {leg.sl_trigger_price:.2f}")
+                return
+                
+            # API Rate Limit Handling (Time Throttle + Price Gap)
+            if (current_time - leg.last_sl_modify_time) >= 0.125: # Max 8 updates per second
+                # Dynamic Threshold: 1% of LTP (minimum 0.5)
+                price_gap_threshold = max(0.5, current * 0.01)
+                
+                if not hasattr(leg, 'last_sl_trigger_sent'):
+                    leg.last_sl_trigger_sent = 0.0
+                    
+                if abs(leg.sl_trigger_price - leg.last_sl_trigger_sent) >= price_gap_threshold:
+                    sl_limit = leg.sl_trigger_price * 0.95 # Arbitrary 5% below trigger for SL-LMT buffer
+                    
+                    if not leg.sl_orderno:
+                        if hasattr(self.order_lifecycle, 'place_sl_order'):
+                            orderno = self.order_lifecycle.place_sl_order(leg, leg.sl_trigger_price, sl_limit)
+                            if orderno:
+                                leg.sl_orderno = orderno
+                                leg.last_sl_modify_time = current_time
+                                leg.last_sl_trigger_sent = leg.sl_trigger_price
+                    else:
+                        if hasattr(self.order_lifecycle, 'modify_sl_order'):
+                            success = self.order_lifecycle.modify_sl_order(leg, leg.sl_orderno, leg.sl_trigger_price, sl_limit)
+                            if success:
+                                leg.last_sl_modify_time = current_time
+                                leg.last_sl_trigger_sent = leg.sl_trigger_price
 
     def _close_all_legs(self, current_nifty_df, reason):
         params = self.get_instrument_params()
         
         for leg in self.trade_context.legs:
             if leg.status == "OPEN":
-                # Delegate Exit to OrderLifecycle
-                if self.order_lifecycle.execute_exit(leg, reason, leg.current_price):
-                    leg.pnl = (leg.exit_price - leg.entry_price) * leg.quantity * params["lot_size"]
-                    self.capital_engine.add_funds((leg.exit_price * leg.quantity * params["lot_size"]))
-                    logger.info(f"Closed Leg {leg.symbol} at Rs{leg.exit_price}. PnL: Rs{leg.pnl:.2f}")
+                # Delegate Exit to OrderLifecycle (pass sl_orderno if we want to modify existing SL)
+                sl_ord = getattr(leg, 'sl_orderno', None)
+                if hasattr(self.order_lifecycle, 'execute_exit'):
+                    # Check signature to see if it accepts pending_sl_orderno
+                    import inspect
+                    sig = inspect.signature(self.order_lifecycle.execute_exit)
+                    if 'pending_sl_orderno' in sig.parameters:
+                        success = self.order_lifecycle.execute_exit(leg, reason, leg.current_price, pending_sl_orderno=sl_ord)
+                    else:
+                        success = self.order_lifecycle.execute_exit(leg, reason, leg.current_price)
+                        
+                    if success:
+                        leg.pnl = (leg.exit_price - leg.entry_price) * leg.quantity * params["lot_size"]
+                        self.capital_engine.add_funds((leg.exit_price * leg.quantity * params["lot_size"]))
+                        logger.info(f"Closed Leg {leg.symbol} at Rs{leg.exit_price}. PnL: Rs{leg.pnl:.2f}")
                 
         self.trade_context.close_context()
         self.trade_context.total_pnl = sum(leg.pnl for leg in self.trade_context.legs)

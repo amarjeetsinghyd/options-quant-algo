@@ -6,7 +6,8 @@ import pandas as pd
 import os
 from datetime import datetime, timedelta
 
-ACTIVE_BROKER = os.getenv("ACTIVE_BROKER", "ANGEL").upper()
+from src.config.engineering_config import BROKER
+ACTIVE_BROKER = (os.getenv("ACTIVE_BROKER") or BROKER).upper()
 
 from src.utils.logger import get_logger
 logger = get_logger("data_fetcher")
@@ -131,7 +132,7 @@ class DataFetcher:
         if not res:
             logger.error(f"Could not find Futures for {name} on {exch_seg}.")
             return None, None, None
-        return res['token'], res['symbol'], exch_seg
+        return res[0], res[1], exch_seg
 
     def get_cash_index_token(self):
         name, exch_seg = self.get_active_instrument()

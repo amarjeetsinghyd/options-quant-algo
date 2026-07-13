@@ -30,11 +30,9 @@ class FeedService:
             sys.exit(1)
 
         # Use the market data provider to get a DataFetcher bound to the broker API
-        self.fetcher = broker.market_data_provider.get_data_fetcher()
+        from src.core.data_fetcher import DataFetcher
+        self.fetcher = DataFetcher(broker)
         self.anchor_token, self.anchor_symbol, self.anchor_exch = self.fetcher.get_cash_index_token()
-        
-        self.eq_exch_type = 1 if self.anchor_exch == "NSE" else 3
-        self.deriv_exch_type = 2 if self.anchor_exch == "NSE" else 4
         
         self.eq_tokens = [self.anchor_token]
         self.eq_tokens.append("99926017") # INDIA VIX
@@ -105,27 +103,44 @@ class FeedService:
                 if sleep_sec > 10:
                     logger.info(f"[FeedService] Off-market ({session_type}). Sleeping for {int(sleep_sec)}s until {next_open}.")
                     time.sleep(sleep_sec - 5)  # Wake up 5 seconds early
-                    logger.warning("[FeedService] Waking up! Exiting to force fresh token generation via LifecycleManager.")
+                    logger.warning(f"[FeedService] Waking up! Restarting feed to get fresh session tokens.")
                     sys.exit(10)
             
             try:
+                self.ws_closed = threading.Event()
+                
+                def on_error_wrapped(err):
+                    self.on_error(err)
+                    self.ws_closed.set()
+                    
+                def on_close_wrapped():
+                    logger.info("[FeedService] WebSocket Closed by broker.")
+                    self.ws_closed.set()
+                    
                 logger.info(f"[FeedService] Starting Live Feed (Attempt {self.reconnect_attempts})...")
                 self.broker.market_data_provider.start_live_feed(
                     on_tick_callback=self.on_data,
                     on_open_callback=self.on_open,
-                    on_error_callback=self.on_error
+                    on_error_callback=on_error_wrapped
                 )
+                
+                # Start websocket returns immediately in Shoonya. We must block here.
+                # Adding a timeout of 1 second so it can be interrupted cleanly.
+                while getattr(self, "running", True) and not self.ws_closed.is_set():
+                    self.ws_closed.wait(1.0)
+                    
                 self.reconnect_attempts = 0
             except Exception as e:
                 logger.error(f"[FeedService] Connection threw error: {e}")
                 
-            self.reconnect_attempts += 1
-            if self.reconnect_attempts > 10:
-                logger.error("[FeedService] Max reconnect attempts reached. Sleeping for 1 minute before trying again.")
-                time.sleep(60)
-            else:
-                logger.info(f"[FeedService] Reconnecting in 3 seconds (Attempt {self.reconnect_attempts}/10)...")
-                time.sleep(3)
+            if getattr(self, "running", True):
+                self.reconnect_attempts += 1
+                if self.reconnect_attempts > 10:
+                    logger.error("[FeedService] Max reconnect attempts reached. Sleeping for 1 minute before trying again.")
+                    time.sleep(60)
+                else:
+                    logger.info(f"[FeedService] Reconnecting in 3 seconds (Attempt {self.reconnect_attempts}/10)...")
+                    time.sleep(3)
 
     def command_listener(self):
         """Listens for dynamic subscription commands from the Brain."""

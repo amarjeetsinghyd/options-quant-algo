@@ -20,6 +20,13 @@ class TradeLeg:
         self.exit_price = None
         self.exit_reason = None
         self.pnl = 0.0
+        
+        # SL State Tracking
+        self.sl_orderno = None
+        self.sl_trigger_price = 0.0
+        self.sl_limit_price = 0.0
+        self.last_sl_modify_time = 0.0
+        self.highest_price = entry_price
 
     def close_leg(self, exit_price: float, reason: str):
         self.status = "CLOSED"
@@ -45,7 +52,11 @@ class TradeLeg:
             "exit_time": self.exit_time.isoformat() if self.exit_time else None,
             "exit_price": self.exit_price,
             "exit_reason": self.exit_reason,
-            "pnl": self.pnl
+            "pnl": self.pnl,
+            "sl_orderno": self.sl_orderno,
+            "sl_trigger_price": self.sl_trigger_price,
+            "sl_limit_price": self.sl_limit_price,
+            "highest_price": self.highest_price
         }
 
 
@@ -61,6 +72,10 @@ class TradeContext:
         self.entry_time = datetime.now()
         self.exit_time = None
         self.total_pnl = 0.0
+        
+        # Context-wide tracking
+        self.hwm_profit_pct = 0.0
+        self.active_phase = "PHASE_1_CONSERVATIVE"
 
     def add_leg(self, leg: TradeLeg):
         self.legs.append(leg)
@@ -83,6 +98,8 @@ class TradeContext:
             "entry_time": self.entry_time.isoformat() if self.entry_time else None,
             "exit_time": self.exit_time.isoformat() if self.exit_time else None,
             "total_pnl": self.total_pnl,
+            "hwm_profit_pct": self.hwm_profit_pct,
+            "active_phase": self.active_phase,
             "decision_payload": self.decision_payload,
             "legs": [leg.to_dict() for leg in self.legs]
         }

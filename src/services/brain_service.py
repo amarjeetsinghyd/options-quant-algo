@@ -39,10 +39,7 @@ class BrainService:
             logger.critical(f"[BrainService] Failed to initialise broker: {e}")
             sys.exit(1)
 
-        # Legacy services still expect the raw Angel API client; retrieve it from the adapter.
-        # The AngelOneAdapter exposes the client via the ``api`` property.
-        self.api = getattr(self.broker, "api", None)
-        # DataFetcher now expects the full IBrokerGateway to be API-agnostic
+        # DataFetcher expects the full IBrokerGateway to be API-agnostic
         self.fetcher = DataFetcher(self.broker)
         self.signal_gen = SignalGenerator()
         
@@ -194,8 +191,21 @@ class BrainService:
                 # Run an initial cleanup on boot
                 self._cleanup_old_indicator_streams(datetime.now())
             else:
-                logger.critical("=== BOOT FAILED: No local disk cache found. Cannot start without history. ===")
-                raise RuntimeError("No local indicator_stream data found on disk.")
+                logger.warning("=== BOOT WARNING: No local disk cache found. Starting fresh (indicators will require warmup). ===")
+                # Initialize empty dataframes with correct types to prevent crash on fresh start
+                empty_df = pd.DataFrame({
+                    'timestamp': pd.Series(dtype='datetime64[ns]'),
+                    'open': pd.Series(dtype='float32'),
+                    'high': pd.Series(dtype='float32'),
+                    'low': pd.Series(dtype='float32'),
+                    'close': pd.Series(dtype='float32'),
+                    'synth_vol': pd.Series(dtype='int32')
+                })
+                self.cached_volume_df = empty_df.set_index('timestamp')[['synth_vol']]
+                self.cached_price_df = empty_df.set_index('timestamp')[['open', 'high', 'low', 'close']]
+                with self._df_lock:
+                    self.current_df = empty_df
+                logger.info("=== BOOT COMPLETE: Engine Online (Fresh Start) ===")
 
         except Exception as e:
             logger.critical(f"BOOT ERROR: {e}")
@@ -331,22 +341,25 @@ class BrainService:
             
         # 3. Anchor Token (Index) Tracking
         if token == self.anchor_token and ltp > 0:
-            self.live_ltp = float(ltp / 100)
+            self.live_ltp = float(ltp)
             if self.live_open is None: self.live_open = self.live_ltp
             if self.live_high is None or self.live_ltp > self.live_high: self.live_high = self.live_ltp
             if self.live_low is None or self.live_ltp < self.live_low: self.live_low = self.live_ltp
             
         # 4. Tracked Options for Gamma Collector
         if token in self.tracked_options and ltp > 0:
-            opt_price = float(ltp / 100)
+            opt_price = float(ltp)
             opt_details = self.tracked_options[token]
-            best_bid = 0.0
-            best_ask = 0.0
-            if 'best_5_buy_data' in message and len(message['best_5_buy_data']) > 0:
-                best_bid = float(message['best_5_buy_data'][0].get('price', 0)) / 100
-            if 'best_5_sell_data' in message and len(message['best_5_sell_data']) > 0:
-                best_ask = float(message['best_5_sell_data'][0].get('price', 0)) / 100
+            best_bid = float(message.get('bid', 0.0))
+            best_ask = float(message.get('ask', 0.0))
             
+            if not best_bid and 'best_5_buy_data' in message and len(message['best_5_buy_data']) > 0:
+                best_bid = float(message['best_5_buy_data'][0].get('price', 0)) / 100
+            if not best_ask and 'best_5_sell_data' in message and len(message['best_5_sell_data']) > 0:
+                best_ask = float(message['best_5_sell_data'][0].get('price', 0)) / 100
+                
+            opt_details["bid"] = best_bid
+            opt_details["ask"] = best_ask
             opt_details["spread"] = round(best_ask - best_bid, 2) if best_ask > best_bid else 0.0
             
             self.exec_pub.publish("EXEC.OPTION_TICK", {
@@ -372,7 +385,7 @@ class BrainService:
 
         # 5. QOT Live Tape & Cache Updates
         if ltp > 0:
-            ltp_val = float(ltp / 100)
+            ltp_val = float(ltp)
             symbol_name = message.get("symbol") or (self.anchor_symbol if token == self.anchor_token else (self.tracked_options[token]["symbol"] if token in self.tracked_options else token))
             
             self.tick_seq_counter += 1
@@ -385,34 +398,46 @@ class BrainService:
                     if isinstance(exchange_time, str):
                         try:
                             dt = datetime.strptime(exchange_time, "%Y-%m-%d %H:%M:%S")
-                            exchange_time = dt.timestamp()
-                        except:
-                            try:
-                                dt = datetime.strptime(exchange_time, "%d-%b-%Y %H:%M:%S")
-                                exchange_time = dt.timestamp()
-                            except:
-                                if exchange_time.replace('.','',1).isdigit():
-                                    exchange_time = float(exchange_time)
-                                else:
-                                    exchange_time = time.time()
-                    latency_ms = max(0, int((time.time() - float(exchange_time)) * 1000))
-                except Exception:
-                    pass
+                            latency_ms = int((datetime.now() - dt).total_seconds() * 1000)
+                        except: pass
+                except: pass
                     
             # Direction and Spread
             tick_dir = "NEUTRAL"
-            best_bid = 0.0
-            best_ask = 0.0
-            if 'best_5_buy_data' in message and len(message['best_5_buy_data']) > 0:
+            best_bid = float(message.get('bid', 0.0))
+            best_ask = float(message.get('ask', 0.0))
+            if not best_bid and 'best_5_buy_data' in message and len(message['best_5_buy_data']) > 0:
                 best_bid = float(message['best_5_buy_data'][0].get('price', 0)) / 100
-            if 'best_5_sell_data' in message and len(message['best_5_sell_data']) > 0:
+            if not best_ask and 'best_5_sell_data' in message and len(message['best_5_sell_data']) > 0:
                 best_ask = float(message['best_5_sell_data'][0].get('price', 0)) / 100
                 
             if best_ask > 0.0 and ltp_val >= best_ask:
-                tick_dir = "BUY"
+                tick_dir = "UP"
             elif best_bid > 0.0 and ltp_val <= best_bid:
-                tick_dir = "SELL"
-                
+                tick_dir = "DOWN"
+            else:
+                last_price = self.order_flow["last_price"] if token == self.subscribed_option else (self.live_ltp if token == self.anchor_token else ltp_val)
+                if ltp_val > last_price:
+                    tick_dir = "UP"
+                elif ltp_val < last_price:
+                    tick_dir = "DOWN"
+                    
+            # Calculate general delta volume for the tape
+            tick_ltq = message.get("last_traded_quantity", 0)
+            
+            self.exec_pub.publish("EXEC.TICK", {
+                "timestamp": int(time.time() * 1000),
+                "instrument": symbol_name,
+                "ltp": ltp_val,
+                "price_change": round((ltp_val - float(message.get("close", ltp_val))) / float(message.get("close", ltp_val)) * 100, 2) if float(message.get("close", 1)) > 0 else 0.0,
+                "delta_volume": tick_ltq,
+                "tick_direction": tick_dir,
+                "bid": best_bid,
+                "ask": best_ask,
+                "spread": round(best_ask - best_bid, 2) if best_ask > best_bid else 0.0,
+                "tick_seq": self.tick_seq_counter,
+                "latency": latency_ms
+            })      
             # Price change
             price_change = 0.0
             if symbol_name in self.prev_ltp_cache:
@@ -460,7 +485,7 @@ class BrainService:
 
         # 5. Order Flow / Delta Tracking for Active Option
         if self.subscribed_option == token and ltp > 0:
-            live_opt_ltp = float(ltp / 100)
+            live_opt_ltp = float(ltp)
             if self.trader.current_trade and token == self.trader.current_trade['token']:
                 # Update UI via exec port if needed
                 pass
@@ -470,12 +495,16 @@ class BrainService:
             elif ltq > 0 and is_market_open:
                 prev_price = self.order_flow["last_price"]
                 best_ask = 0
-                best_bid = 0
+                best_bid = float(message.get('bid', 0.0))
+                best_ask = float(message.get('ask', 0.0))
                 
-                ask_data = message.get('best_5_sell_data', [])
                 bid_data = message.get('best_5_buy_data', [])
-                if ask_data and isinstance(ask_data, list): best_ask = ask_data[0].get('price', 0) / 100
-                if bid_data and isinstance(bid_data, list): best_bid = bid_data[0].get('price', 0) / 100
+                sell_data = message.get('best_5_sell_data', [])
+                
+                if not best_bid and bid_data and isinstance(bid_data, list) and len(bid_data) > 0:
+                    best_bid = float(bid_data[0].get('price', 0)) / 100
+                if not best_ask and sell_data and isinstance(sell_data, list) and len(sell_data) > 0:
+                    best_ask = float(sell_data[0].get('price', 0)) / 100
                     
                 is_buy = False
                 if best_ask > 0 and live_opt_ltp >= best_ask: is_buy = True
@@ -696,28 +725,19 @@ class BrainService:
                                 else:
                                     self.strategy_stats["Strategy 2"]["rejected"] += 1
                                     
-                                    s3_sig, s3_state = self.signal_gen.check_vwap_band_breakout_signal(self.current_df, generate_trace=True)
-                                    if s3_sig:
-                                        triggered_strategy = "Strategy 3"
-                                        self.strategy_stats["Strategy 3"]["candidate"] += 1
-                                        signal, decision_state = s3_sig, s3_state
-                                    else:
-                                        self.strategy_stats["Strategy 3"]["rejected"] += 1
-                                        signal, decision_state = None, s3_state
-                                        strat1_reason = s1_state.get("human_reason", "Strategy 1 failed")
-                                        strat2_reason = s2_state.get("human_reason", "Strategy 2 failed")
-                                        strat3_reason = s3_state.get("human_reason", "Strategy 3 failed")
-                                        decision_state["human_reason"] = f"S1: {strat1_reason} | S2: {strat2_reason} | S3: {strat3_reason}"
-                                        
-                                        # Combine rule evaluations from all strategies if they didn't trigger
-                                        combined_rules = []
-                                        combined_rules.extend(s1_state.get("rule_evaluations", []))
-                                        combined_rules.extend(s2_state.get("rule_evaluations", []))
-                                        combined_rules.extend(s3_state.get("rule_evaluations", []))
-                                        decision_state["rule_evaluations"] = combined_rules
-                                        
-                                        decision_state["machine_state"]["strategy_1_state"] = s1_state.get("machine_state", {})
-                                        decision_state["machine_state"]["strategy_2_state"] = s2_state.get("machine_state", {})
+                                    signal, decision_state = None, s2_state
+                                    strat1_reason = s1_state.get("human_reason", "Strategy 1 failed")
+                                    strat2_reason = s2_state.get("human_reason", "Strategy 2 failed")
+                                    decision_state["human_reason"] = f"S1: {strat1_reason} | S2: {strat2_reason}"
+                                    
+                                    # Combine rule evaluations from all strategies if they didn't trigger
+                                    combined_rules = []
+                                    combined_rules.extend(s1_state.get("rule_evaluations", []))
+                                    combined_rules.extend(s2_state.get("rule_evaluations", []))
+                                    decision_state["rule_evaluations"] = combined_rules
+                                    
+                                    decision_state["machine_state"]["strategy_1_state"] = s1_state.get("machine_state", {})
+                                    decision_state["machine_state"]["strategy_2_state"] = s2_state.get("machine_state", {})
                         
                         latest = self.current_df.iloc[-1]
                         

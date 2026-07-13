@@ -17,11 +17,14 @@ class MessageBusPublisher:
     """
     ZeroMQ Publisher wrapper.
     Creates a PUB socket and binds to a specific TCP port.
+    Thread-safe for concurrent publish calls.
     """
     def __init__(self, port: int):
         self.port = port
         self.context = zmq.Context()
         self.socket = self.context.socket(zmq.PUB)
+        import threading
+        self.lock = threading.Lock()
         
         # High-water mark to prevent memory leaks if subscribers are slow
         self.socket.setsockopt(zmq.SNDHWM, 10000)
@@ -42,13 +45,14 @@ class MessageBusPublisher:
         """
         Publishes a JSON payload under a specific topic string.
         """
-        try:
-            payload = json.dumps(message)
-            # ZMQ Pub/Sub uses envelope matching. Topic and message are sent as multipart.
-            self.socket.send_string(topic, flags=zmq.SNDMORE)
-            self.socket.send_string(payload)
-        except Exception as e:
-            logger.error(f"[ZMQ] Error publishing to topic '{topic}': {e}")
+        with self.lock:
+            try:
+                payload = json.dumps(message)
+                # ZMQ Pub/Sub uses envelope matching. Topic and message are sent as multipart.
+                self.socket.send_string(topic, flags=zmq.SNDMORE)
+                self.socket.send_string(payload)
+            except Exception as e:
+                logger.error(f"[ZMQ] Error publishing to topic '{topic}': {e}")
 
     def close(self):
         self.socket.close()

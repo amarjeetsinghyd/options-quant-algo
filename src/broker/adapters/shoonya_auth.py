@@ -88,6 +88,11 @@ class ShoonyaHeadlessOAuthProvider:
             self._fast_fill(visible_inputs[0], self.userid)
             self._fast_fill(visible_inputs[1], self.password)
             
+            # Wait a tiny bit and refetch to avoid StaleElementReferenceException
+            time.sleep(0.5)
+            all_inputs = driver.find_elements(By.CSS_SELECTOR, "input:not([type='hidden']):not([type='checkbox']):not([type='radio'])")
+            visible_inputs = [inp for inp in all_inputs if inp.is_displayed()]
+            
             otp_value = pyotp.TOTP(self.totp_secret).now()
             self._fast_fill(visible_inputs[2], otp_value)
             
@@ -122,43 +127,13 @@ class ShoonyaHeadlessOAuthProvider:
             
         return auth_code
 
-    def _exchange_code_for_token(self, auth_code: str) -> str:
-        logger.info("[ShoonyaAuth] Exchanging auth_code for access_token (QuickAuth)...")
-        checksum_raw = f"{self.client_id}{self.client_secret}{auth_code}"
-        checksum = hashlib.sha256(checksum_raw.encode("utf-8")).hexdigest()
-        
-        headers = {
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Accept": "application/json",
-            "Authorization": f"Bearer {checksum}",
-        }
-        
-        jdata_obj = {
-            "code": auth_code,
-            "checksum": checksum
-        }
-        
-        data = {
-            "jData": json.dumps(jdata_obj)
-        }
-        
-        resp = requests.post(self.token_url, data=data, headers=headers, timeout=15)
-        resp_json = resp.json()
-        
-        if resp_json.get("stat") == "Ok" and "susertoken" in resp_json:
-            logger.info("[ShoonyaAuth] Token exchange successful.")
-            return resp_json["susertoken"]
-        else:
-            logger.error(f"[ShoonyaAuth] Token exchange failed: {resp_json}")
-            raise PermissionError(f"OAuth QuickAuth failed: {resp_json.get('emsg', resp_json)}")
-
     def authenticate(self) -> str:
         """
         Executes the complete isolated headless OAuth flow.
-        Returns the susertoken upon success.
+        Returns the auth_code upon success.
         """
         auth_code = self._get_auth_code_via_selenium()
         if not auth_code:
             raise ValueError("Failed to retrieve auth_code from headless flow.")
             
-        return self._exchange_code_for_token(auth_code)
+        return auth_code

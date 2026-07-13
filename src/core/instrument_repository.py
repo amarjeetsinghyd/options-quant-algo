@@ -168,7 +168,11 @@ class InstrumentRepository:
             future_contracts = []
             for r in rows:
                 try:
-                    expiry_dt = datetime.strptime(r['expiry'], '%d%b%Y')
+                    # Try both Angel (28JUL2026) and Shoonya (28-JUL-2026) expiry formats
+                    try:
+                        expiry_dt = datetime.strptime(r['expiry'], '%d-%b-%Y')
+                    except ValueError:
+                        expiry_dt = datetime.strptime(r['expiry'], '%d%b%Y')
                     future_contracts.append((expiry_dt, r['broker_token'], r['symbol']))
                 except ValueError:
                     pass
@@ -203,7 +207,10 @@ class InstrumentRepository:
             option_contracts = []
             for r in rows:
                 try:
-                    expiry_dt = datetime.strptime(r['expiry'], '%d%b%Y')
+                    try:
+                        expiry_dt = datetime.strptime(r['expiry'], '%d-%b-%Y')
+                    except ValueError:
+                        expiry_dt = datetime.strptime(r['expiry'], '%d%b%Y')
                     option_contracts.append((expiry_dt, dict(r)))
                 except ValueError:
                     pass

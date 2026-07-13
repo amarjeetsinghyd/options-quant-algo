@@ -1,6 +1,10 @@
 # session_manager.py
-# AngelOne SmartAPI Session Lifecycle Manager
+# AngelOne SmartAPI Session Lifecycle Manager  [ANGEL-ONLY LEGACY MODULE]
 # QuantOS Runtime — src/core/session_manager.py
+#
+# NOTE: This module is ONLY used by the Angel One broker adapter (angel_one_adapter.py).
+# For Shoonya, session management is handled by ShoonyaSessionProvider in shoonya_adapter.py.
+# This file is preserved for backward compatibility if Angel One is re-enabled.
 #
 # Responsibilities:
 #   1. Single shared login for the entire process (no duplicate logins)

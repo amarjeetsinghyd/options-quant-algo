@@ -11,8 +11,9 @@ from .registry import register_adapter
 def get_broker_adapter() -> Any:
     """Return an instance of the configured broker adapter.
 
-    The ``BROKER`` setting (default ``ANGEL``) determines which concrete
+    The ``BROKER`` setting (read from .env) determines which concrete
     adapter class is imported from ``src.broker.adapters``.
+    Currently active: SHOONYA. Supported values: ANGEL, SHOONYA.
     """
     broker_name = BROKER.upper()
     if broker_name == "ANGEL":
