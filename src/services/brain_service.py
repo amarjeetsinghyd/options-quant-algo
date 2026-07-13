@@ -653,7 +653,7 @@ class BrainService:
                     t0 = time.time()
                     
                     # ── GAP 1 FIX: ALWAYS EVALUATE SIGNALS DURING TRADING WINDOW ──
-                    is_trading_window = (now.hour > 10 or (now.hour == 10 and now.minute >= 0)) and (now.hour < 15 or (now.hour == 15 and now.minute < 15))
+                    is_trading_window = (now.hour > 9 or (now.hour == 9 and now.minute >= 16)) and (now.hour < 15 or (now.hour == 15 and now.minute < 15))
                     is_stale = (now_ts - self._last_fetch_time) > 180  # 3 minutes stale
                     
                     if is_trading_window:
