@@ -275,6 +275,41 @@ def get_status():
     }
     return jsonify(payload)
 
+@app.route('/api/chart_data')
+def chart_data():
+    try:
+        snapshot = read_dashboard_snapshot()
+        chart_payload = snapshot.get("chart_data", [])
+        if not chart_payload:
+            return jsonify([])
+        
+        df = pd.DataFrame(chart_payload)
+        df['timestamp_dt'] = pd.to_datetime(df['timestamp'])
+        df['time'] = df['timestamp_dt'].apply(lambda x: int(x.timestamp()))
+        df = df.drop_duplicates(subset=['time'], keep='last')
+        
+        if 'volume' in df.columns:
+            df['value'] = df['volume']
+        elif 'synth_vol' in df.columns:
+            df['value'] = df['synth_vol']
+        else:
+            df['value'] = 0
+            
+        df = df.fillna(0)
+        
+        cols = ['time', 'open', 'high', 'low', 'close', 'value']
+        if 'vwap' in df.columns: cols.append('vwap')
+        if 'ema_9' in df.columns: cols.append('ema_9')
+        if 'vfi' in df.columns: cols.append('vfi')
+        if 'vfi_ema' in df.columns: cols.append('vfi_ema')
+        
+        cols = [c for c in cols if c in df.columns]
+        json_data = df[cols].to_json(orient='records')
+        return app.response_class(json_data, mimetype='application/json')
+    except Exception as e:
+        import traceback
+        return jsonify({"error": str(e), "traceback": traceback.format_exc()})
+
 NOTIFICATION_HISTORY_FILE = os.path.join(os.path.dirname(__file__), 'runtime', 'notification_history.json')
 
 def load_notification_history():
@@ -657,6 +692,54 @@ def dataset_health():
         "generated_at": datetime.now().isoformat(),
         "datasets": [tick_stats, feature_stats, dec_stats, trade_stats]
     })
+
+# --- QOT Console Controller (Virtual Lock) ---
+@app.route('/api/capital/lock', methods=['POST'])
+def apply_lock():
+    from src.config.engineering_config import DATA_DIR
+    try:
+        data = request.json
+        if not data or 'amount' not in data:
+            return jsonify({"error": "Missing 'amount' in request body"}), 400
+            
+        amount = float(data['amount'])
+        if amount < 0:
+            return jsonify({"error": "Lock amount cannot be negative"}), 400
+            
+        state_file = os.path.join(DATA_DIR, "capital_state.json")
+        state_data = {}
+        
+        if os.path.exists(state_file):
+            try:
+                with open(state_file, "r") as f:
+                    state_data = json.load(f)
+            except Exception:
+                pass
+                
+        state_data['locked_withdrawal_amount'] = amount
+        
+        os.makedirs(os.path.dirname(state_file), exist_ok=True)
+        with open(state_file, "w") as f:
+            json.dump(state_data, f, indent=4)
+            
+        logger.info(f"[UI Controller] Virtual Lock applied: {amount}")
+        return jsonify({"success": True, "locked_withdrawal_amount": amount})
+    except Exception as e:
+        logger.error(f"[UI Controller] Error applying lock: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/capital/lock', methods=['GET'])
+def get_lock():
+    from src.config.engineering_config import DATA_DIR
+    state_file = os.path.join(DATA_DIR, "capital_state.json")
+    try:
+        if os.path.exists(state_file):
+            with open(state_file, "r") as f:
+                state_data = json.load(f)
+                return jsonify({"locked_withdrawal_amount": float(state_data.get("locked_withdrawal_amount", 0.0))})
+    except Exception:
+        pass
+    return jsonify({"locked_withdrawal_amount": 0.0})
 
 if __name__ == '__main__':
     host = '0.0.0.0' if REMOTE_DASHBOARD_ENABLED else '127.0.0.1'

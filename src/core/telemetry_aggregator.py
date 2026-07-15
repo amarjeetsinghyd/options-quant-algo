@@ -60,6 +60,9 @@ class RuntimeTelemetryAggregator:
             try:
                 with open(self.trade_history_file, 'r', encoding='utf-8') as f:
                     history_data = json.load(f)
+                    if not isinstance(history_data, list):
+                        logger.warning("trade_history.json is not a list. Resetting.")
+                        history_data = []
             except Exception as e:
                 logger.warning(f"Could not load trade history: {e}")
                 
@@ -69,6 +72,9 @@ class RuntimeTelemetryAggregator:
             try:
                 with open(self.notification_history_file, 'r', encoding='utf-8') as f:
                     self.notification_history = json.load(f)
+                    if not isinstance(self.notification_history, list):
+                        logger.warning("notification_history.json is not a list. Resetting.")
+                        self.notification_history = []
             except Exception as e:
                 logger.warning(f"Could not load notification history: {e}")
                 
@@ -79,6 +85,7 @@ class RuntimeTelemetryAggregator:
             "telemetry": {},
             "active_trade": None,
             "history": history_data,
+            "chart_data": [],
             "decisions": [],
             "last_ticks": [],
             "system_events": [],
@@ -94,6 +101,8 @@ class RuntimeTelemetryAggregator:
                     with self.state_lock:
                         if snapshot.get("telemetry"):
                             self.state["telemetry"] = snapshot["telemetry"]
+                        if snapshot.get("chart_data"):
+                            self.state["chart_data"] = snapshot["chart_data"]
                         if snapshot.get("active_trade"):
                             self.state["active_trade"] = snapshot["active_trade"]
                         if snapshot.get("decisions"):
@@ -157,6 +166,9 @@ class RuntimeTelemetryAggregator:
                     self.state["telemetry"].update(payload)
                 else:
                     self.state["telemetry"] = payload
+                
+            elif topic == "EXEC.CHART_SYNC":
+                self.state["chart_data"] = payload
                 
             elif topic == "EXEC.ACTIVE_TRADE":
                 self.state["active_trade"] = payload

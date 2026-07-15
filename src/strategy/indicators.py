@@ -1,5 +1,6 @@
 import polars as pl
 import pandas as pd
+import numpy as np
 from datetime import time
 
 def calculate_vwap_expr(price_col='typical_price', out_col='vwap'):
@@ -43,11 +44,21 @@ def append_all_indicators(df_pandas):
         calculate_vwap_expr('low', 'vwap_low')
     ])
     
-    # Calculate EMA 9
-    alpha_ema = 2 / (9 + 1)
-    df = df.with_columns(
-        pl.col('close').ewm_mean(alpha=alpha_ema, adjust=False).alias('ema_9')
-    )
+    # Calculate EMA 9 — TradingView-compatible SMA-seeded method.
+    # TradingView seeds EMA with SMA of the first `period` bars, then applies
+    # exponential smoothing. Using bar[0] as seed (adjust=False) causes a ~1-2
+    # point divergence that never fully closes. This numpy loop is fast enough
+    # for our 750-bar window (<1ms extra).
+    period_ema = 9
+    alpha_ema = 2.0 / (period_ema + 1)  # 0.2
+    closes_np = df['close'].to_numpy().astype(float)
+    ema_values = np.full(len(closes_np), np.nan)
+    if len(closes_np) >= period_ema:
+        # Seed: simple average of first `period_ema` bars — same as TradingView
+        ema_values[period_ema - 1] = float(np.mean(closes_np[:period_ema]))
+        for i in range(period_ema, len(closes_np)):
+            ema_values[i] = closes_np[i] * alpha_ema + ema_values[i - 1] * (1.0 - alpha_ema)
+    df = df.with_columns(pl.Series('ema_9', ema_values))
     
     # VSA Gatekeeper Metrics
     df = df.with_columns(

@@ -9,7 +9,8 @@ os.environ["POLARS_IGNORE_TIMEZONE_PARSE_ERROR"] = "1"
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-from datetime import datetime
+# Added timedelta import for cleanup routine
+from datetime import datetime, timedelta
 
 # Add root directory to python path if run as script
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
@@ -76,8 +77,7 @@ class BrainService:
         self.current_df = None
         
         # Async Fetch Architecture
-        self._df_lock = threading.Lock()
-        self._volume_fetch_thread = None
+        self._df_lock = threading.RLock()
         self._last_fetch_time = 0
         
         self.current_minute_volume_tracker = {}
@@ -104,7 +104,6 @@ class BrainService:
         self.feed_active_logged = False
         
         self.tracked_options = {}
-        self.last_historic_fetch = 0
         self.last_option_refresh = 0
         self.last_saved_indicator_minute = -1  # Tracks last minute we archived indicators
 
@@ -191,21 +190,83 @@ class BrainService:
                 # Run an initial cleanup on boot
                 self._cleanup_old_indicator_streams(datetime.now())
             else:
-                logger.warning("=== BOOT WARNING: No local disk cache found. Starting fresh (indicators will require warmup). ===")
-                # Initialize empty dataframes with correct types to prevent crash on fresh start
-                empty_df = pd.DataFrame({
-                    'timestamp': pd.Series(dtype='datetime64[ns]'),
-                    'open': pd.Series(dtype='float32'),
-                    'high': pd.Series(dtype='float32'),
-                    'low': pd.Series(dtype='float32'),
-                    'close': pd.Series(dtype='float32'),
-                    'synth_vol': pd.Series(dtype='int32')
-                })
-                self.cached_volume_df = empty_df.set_index('timestamp')[['synth_vol']]
-                self.cached_price_df = empty_df.set_index('timestamp')[['open', 'high', 'low', 'close']]
-                with self._df_lock:
-                    self.current_df = empty_df
-                logger.info("=== BOOT COMPLETE: Engine Online (Fresh Start) ===")
+                logger.warning("=== BOOT WARNING: No local disk cache found. Checking if REST fetch is needed... ===")
+                # Guard: Only fetch from REST API ONCE per calendar day.
+                # If the machine reboots mid-session, the indicator_stream will already
+                # have today's candles saved to disk (from the previous session run), so
+                # the `if dfs:` branch above will handle it. This path only runs on the
+                # VERY FIRST boot of the day (e.g., pre-market or after overnight cleanup).
+                # Calling get_historical_candles_with_synthetic_volume fetches 50+ REST
+                # calls (all Nifty constituents). Doing this on every reboot would starve
+                # the exit strategy of its API quota.
+                today_str = datetime.now().strftime("%Y-%m-%d")
+                boot_stamp_file = Path(INSTITUTIONAL_MEMORY_DIR) / "indicator_stream" / f".boot_fetched_{today_str}"
+
+                if boot_stamp_file.exists():
+                    logger.warning(f"=== BOOT: REST fetch already done today ({today_str}). Skipping to protect exit strategy API quota. Starting with empty warmup. ===")
+                    # The session had data earlier but it's been cleaned/lost mid-session.
+                    # Start blank — indicators warm up over 130 bars from live ticks.
+                    empty_df = pd.DataFrame({
+                        'timestamp': pd.Series(dtype='datetime64[ns]'),
+                        'open': pd.Series(dtype='float32'),
+                        'high': pd.Series(dtype='float32'),
+                        'low': pd.Series(dtype='float32'),
+                        'close': pd.Series(dtype='float32'),
+                        'synth_vol': pd.Series(dtype='int32')
+                    })
+                    self.cached_volume_df = empty_df.set_index('timestamp')[['synth_vol']]
+                    self.cached_price_df = empty_df.set_index('timestamp')[['open', 'high', 'low', 'close']]
+                    with self._df_lock:
+                        self.current_df = empty_df
+                    logger.info("=== BOOT COMPLETE: Engine Online (Warmup Mode — REST quota protected) ===")
+                else:
+                    # First boot of the day — safe to make the 50-constituent REST fetch.
+                    logger.warning("=== BOOT: First boot of day. Fetching full historical data from broker REST API (runs once/day only)... ===")
+                    try:
+                        live_df = self.fetcher.get_historical_candles_with_synthetic_volume(days_back=2)
+                        if not live_df.empty:
+                            live_df['timestamp'] = pd.to_datetime(live_df['timestamp'])
+                            live_df = live_df.drop_duplicates(subset=['timestamp']).sort_values('timestamp')
+                            live_df = live_df.tail(750).reset_index(drop=True)
+
+                            if 'volume' in live_df.columns and 'synth_vol' not in live_df.columns:
+                                live_df['synth_vol'] = live_df['volume']
+                            elif 'synth_vol' not in live_df.columns:
+                                live_df['synth_vol'] = 0
+
+                            fcols = live_df.select_dtypes('float').columns
+                            icols = live_df.select_dtypes('integer').columns
+                            live_df[fcols] = live_df[fcols].astype('float32')
+                            live_df[icols] = live_df[icols].astype('int32')
+
+                            self.cached_volume_df = live_df.set_index('timestamp')[['synth_vol']]
+                            self.cached_price_df = live_df.set_index('timestamp')[['open', 'high', 'low', 'close']]
+                            with self._df_lock:
+                                self.current_df = live_df
+
+                            # Write the daily stamp so mid-session reboots skip this fetch
+                            boot_stamp_file.parent.mkdir(parents=True, exist_ok=True)
+                            boot_stamp_file.touch()
+                            logger.info(f"=== BOOT COMPLETE: Engine Online from Live REST Fetch ({len(live_df)} bars, synth_vol ready) ===")
+                        else:
+                            raise ValueError("Empty DataFrame from historical fetch")
+                    except Exception as fetch_err:
+                        logger.warning(f"=== BOOT: Live historical fetch failed ({fetch_err}). Starting with empty DataFrame — VWAP/VFI will warm up over ~130 bars. ===")
+                        empty_df = pd.DataFrame({
+                            'timestamp': pd.Series(dtype='datetime64[ns]'),
+                            'open': pd.Series(dtype='float32'),
+                            'high': pd.Series(dtype='float32'),
+                            'low': pd.Series(dtype='float32'),
+                            'close': pd.Series(dtype='float32'),
+                            'synth_vol': pd.Series(dtype='int32')
+                        })
+                        self.cached_volume_df = empty_df.set_index('timestamp')[['synth_vol']]
+                        self.cached_price_df = empty_df.set_index('timestamp')[['open', 'high', 'low', 'close']]
+                        with self._df_lock:
+                            self.current_df = empty_df
+                        logger.info("=== BOOT COMPLETE: Engine Online (Fresh Start, no historical data) ===")
+
+
 
         except Exception as e:
             logger.critical(f"BOOT ERROR: {e}")
@@ -268,7 +329,33 @@ class BrainService:
             if hasattr(closed_candle.get('timestamp'), 'isoformat'):
                 closed_candle['timestamp'] = str(closed_candle['timestamp'])
 
+            # Fix 3: Persist the synth_vol that was actually used for VWAP/VFI computation.
+            # current_df has OHLCV + indicator columns but synth_vol lives in cached_volume_df.
+            # Without this, a reboot will reload indicator snapshots with no volume data,
+            # causing VWAP to be unweighted (wrong) and VFI to be near-zero.
+            if 'synth_vol' not in closed_candle or closed_candle.get('synth_vol', 0) == 0:
+                try:
+                    closed_ts = pd.Timestamp(closed_candle['timestamp'])
+                    with self._df_lock:
+                        vol_df_snap = self.cached_volume_df
+                    if vol_df_snap is not None and not vol_df_snap.empty:
+                        # Match by nearest timestamp
+                        if closed_ts in vol_df_snap.index:
+                            closed_candle['synth_vol'] = int(vol_df_snap.at[closed_ts, 'synth_vol'])
+                        else:
+                            # Fallback: nearest minute
+                            nearest = vol_df_snap.index.asof(closed_ts)
+                            if pd.notna(nearest):
+                                closed_candle['synth_vol'] = int(vol_df_snap.at[nearest, 'synth_vol'])
+                            else:
+                                closed_candle['synth_vol'] = 0
+                    else:
+                        closed_candle['synth_vol'] = 0
+                except Exception:
+                    closed_candle['synth_vol'] = 0
+
             df = pd.DataFrame([closed_candle])
+
 
             # Save to: INSTITUTIONAL_MEMORY_DIR/indicator_stream/YYYY/MM/DD/indicators_HHMM.parquet
             date_str = now.strftime("%Y/%m/%d")
@@ -309,7 +396,10 @@ class BrainService:
         ltp = message.get('last_traded_price', 0)
         vtt = message.get('volume_trade_for_the_day', 0)
         
-        # 1. Minute Rollover for Synthetic Volume
+        # 1. Minute Rollover for Synthetic Volume + Candle Promotion
+        # When the minute changes, the previous virtual candle is now a CLOSED candle.
+        # We promote it directly into cached_price_df and cached_volume_df from live
+        # WebSocket data — no REST call needed at all.
         if now.minute != self.live_volume_minute:
             total_vol = sum(self.current_minute_volume_tracker.values())
             ts = pd.Timestamp(now.replace(minute=self.live_volume_minute, second=0, microsecond=0))
@@ -322,6 +412,20 @@ class BrainService:
                 self.cached_volume_df = new_row.combine_first(self.cached_volume_df)
             else:
                 self.cached_volume_df = new_row
+            
+            # Promote closed OHLC candle into cached_price_df from the virtual candle data.
+            # This keeps cached_price_df current without any REST API calls.
+            if self.live_open and self.live_high and self.live_low and self.live_ltp:
+                closed_price_row = pd.DataFrame({
+                    'open':  [float(self.live_open)],
+                    'high':  [float(self.live_high)],
+                    'low':   [float(self.live_low)],
+                    'close': [float(self.live_ltp)]
+                }, index=pd.Index([ts], name='timestamp'))
+                if self.cached_price_df is not None:
+                    self.cached_price_df = closed_price_row.combine_first(self.cached_price_df)
+                else:
+                    self.cached_price_df = closed_price_row
                 
             for t, vol in self.current_minute_volume_tracker.items():
                 self.last_known_vtt[t] = self.last_known_vtt.get(t, 0) + vol
@@ -486,7 +590,7 @@ class BrainService:
         # 5. Order Flow / Delta Tracking for Active Option
         if self.subscribed_option == token and ltp > 0:
             live_opt_ltp = float(ltp)
-            if self.trader.current_trade and token == self.trader.current_trade['token']:
+            if self.trader.trade_context and token == self.trader.trade_context['token']:
                 # Update UI via exec port if needed
                 pass
                 
@@ -535,43 +639,61 @@ class BrainService:
             }
         return {}
 
-    def _background_volume_fetch(self):
-        try:
-            new_price_df = self.fetcher.get_historical_candles(self.anchor_exch, self.anchor_token, "ONE_MINUTE", minutes_back=15)
-            if not new_price_df.empty:
-                new_price_df = new_price_df.set_index('timestamp')[['open', 'high', 'low', 'close']]
-                with self._df_lock:
-                    if self.cached_price_df is not None:
-                        self.cached_price_df = new_price_df.combine_first(self.cached_price_df)
-                    else:
-                        self.cached_price_df = new_price_df
-                    self._last_fetch_time = time.time()
-        except Exception as e:
-            logger.error(f"[BrainService] Background volume fetch error: {e}")
-
     def execute_logic_loop(self):
         """Runs on a separate thread to poll historical data and trigger logic."""
         # Wait for boot
         while self.cached_price_df is None:
             time.sleep(1)
-            
+
+        # ── ONE-TIME BOOT GAP FILL ──────────────────────────────────────────────
+        # If indicator_stream had data from disk, there may be a gap between the
+        # last saved candle and now (e.g., machine was off overnight or rebooted
+        # mid-session). Fill that gap with a SINGLE REST call — price only, no
+        # constituent volume fetch. This runs ONCE at startup and never again.
+        # Volume for gap bars will be 0 (those bars won't affect VWAP weighting).
+        try:
+            if self.cached_price_df is not None and not self.cached_price_df.empty:
+                last_ts = self.cached_price_df.index.max()
+                now_ts_dt = datetime.now()
+                gap_minutes = int((now_ts_dt - last_ts.replace(tzinfo=None)).total_seconds() / 60)
+                if 1 <= gap_minutes <= 500:  # Fill gaps of 1 minute or more
+                    logger.info(f"[BootGapFill] Gap detected: {gap_minutes} min since last candle ({last_ts}). Fetching missing price candles...")
+                    from datetime import timedelta
+                    gap_start = last_ts.replace(tzinfo=None) + timedelta(minutes=1)
+                    gap_df = self.fetcher.get_historical_candles(
+                        self.anchor_exch, self.anchor_token, "ONE_MINUTE",
+                        minutes_back=gap_minutes + 2
+                    )
+                    if not gap_df.empty:
+                        gap_df['timestamp'] = pd.to_datetime(gap_df['timestamp'])
+                        # FIX: Use >= instead of > so we do not drop the first missing candle!
+                        gap_df = gap_df[gap_df['timestamp'] >= pd.Timestamp(gap_start)]
+                        if not gap_df.empty:
+                            gap_price = gap_df.set_index('timestamp')[['open', 'high', 'low', 'close']]
+                            
+                            with self._df_lock:
+                                self.cached_price_df = gap_price.combine_first(self.cached_price_df)
+                                
+                                # FIX: Also splice the gap into cached_volume_df with 0 volume 
+                                # so that VWAP logic has a clean dataset without NaNs.
+                                gap_vol = pd.DataFrame(index=gap_price.index)
+                                gap_vol['synth_vol'] = 0
+                                if self.cached_volume_df is not None:
+                                    self.cached_volume_df = gap_vol.combine_first(self.cached_volume_df)
+                                else:
+                                    self.cached_volume_df = gap_vol
+                                    
+                            logger.info(f"[BootGapFill] Spliced {len(gap_df)} missing candles. Indicator chain is seamless.")
+        except Exception as e:
+            logger.warning(f"[BootGapFill] Gap fill failed (non-critical): {e}")
+        # ────────────────────────────────────────────────────────────────────────
+
         while True:
             now = datetime.now()
             is_market_open = (now.hour == 9 and now.minute >= 15) or (9 < now.hour < 15) or (now.hour == 15 and now.minute <= 30)
             
             if is_market_open and self.live_ltp is not None:
                 now_ts = time.time()
-                
-                # Fetch recent candles every 60 seconds to ensure consistency with broker (aligns with 1-min candle interval)
-                if now_ts - self.last_historic_fetch >= 60:
-                    if not self._volume_fetch_thread or not self._volume_fetch_thread.is_alive():
-                        self._volume_fetch_thread = threading.Thread(
-                            target=self._background_volume_fetch, daemon=True
-                        )
-                        self._volume_fetch_thread.start()
-                    else:
-                        logger.warning("[BrainService] Overlap guard: Previous background fetch is still running.")
-                    self.last_historic_fetch = now_ts
                 
                 try:
                     with self._df_lock:
@@ -582,7 +704,15 @@ class BrainService:
                             
                             # Inject Virtual Candle
                             live_ts = pd.Timestamp(now.replace(second=0, microsecond=0))
-                            if getattr(price_df['timestamp'].dtype, 'tz', None) is not None:
+                            # Guard against duplicate columns before accessing .dtype
+            if price_df.columns.duplicated().any():
+                price_df = price_df.loc[:, ~price_df.columns.duplicated()]
+
+            ts_col = price_df['timestamp']
+            if isinstance(ts_col, pd.DataFrame):
+                ts_col = ts_col.iloc[:, 0]
+
+            if getattr(ts_col.dtype, 'tz', None) is not None:
                                 live_ts = live_ts.tz_localize(price_df['timestamp'].dtype.tz)
                                 
                             live_vol = sum(self.current_minute_volume_tracker.values())
@@ -677,7 +807,7 @@ class BrainService:
                 if self.current_df is not None:
                     was_pending = self.trader.pending_setup is not None
                     pending_signal = self.trader.pending_setup.copy() if was_pending else None
-                    was_trade = self.trader.current_trade is not None
+                    was_trade = self.trader.trade_context is not None
                     
                     t0 = time.time()
                     
@@ -725,19 +855,30 @@ class BrainService:
                                 else:
                                     self.strategy_stats["Strategy 2"]["rejected"] += 1
                                     
-                                    signal, decision_state = None, s2_state
-                                    strat1_reason = s1_state.get("human_reason", "Strategy 1 failed")
-                                    strat2_reason = s2_state.get("human_reason", "Strategy 2 failed")
-                                    decision_state["human_reason"] = f"S1: {strat1_reason} | S2: {strat2_reason}"
-                                    
-                                    # Combine rule evaluations from all strategies if they didn't trigger
-                                    combined_rules = []
-                                    combined_rules.extend(s1_state.get("rule_evaluations", []))
-                                    combined_rules.extend(s2_state.get("rule_evaluations", []))
-                                    decision_state["rule_evaluations"] = combined_rules
-                                    
-                                    decision_state["machine_state"]["strategy_1_state"] = s1_state.get("machine_state", {})
-                                    decision_state["machine_state"]["strategy_2_state"] = s2_state.get("machine_state", {})
+                                    s3_sig, s3_state = self.signal_gen.check_vwap_band_breakout(self.current_df, generate_trace=True)
+                                    if s3_sig:
+                                        triggered_strategy = "Strategy 3"
+                                        self.strategy_stats["Strategy 3"]["candidate"] += 1
+                                        signal, decision_state = s3_sig, s3_state
+                                    else:
+                                        self.strategy_stats["Strategy 3"]["rejected"] += 1
+                                        signal, decision_state = None, s3_state
+                                        
+                                        strat1_reason = s1_state.get("human_reason", "Strategy 1 failed")
+                                        strat2_reason = s2_state.get("human_reason", "Strategy 2 failed")
+                                        strat3_reason = s3_state.get("human_reason", "Strategy 3 failed")
+                                        decision_state["human_reason"] = f"S1: {strat1_reason} | S2: {strat2_reason} | S3: {strat3_reason}"
+                                        
+                                        # Combine rule evaluations from all strategies if they didn't trigger
+                                        combined_rules = []
+                                        combined_rules.extend(s1_state.get("rule_evaluations", []))
+                                        combined_rules.extend(s2_state.get("rule_evaluations", []))
+                                        combined_rules.extend(s3_state.get("rule_evaluations", []))
+                                        decision_state["rule_evaluations"] = combined_rules
+                                        
+                                        decision_state["machine_state"]["strategy_1_state"] = s1_state.get("machine_state", {})
+                                        decision_state["machine_state"]["strategy_2_state"] = s2_state.get("machine_state", {})
+                                        decision_state["machine_state"]["strategy_3_state"] = s3_state.get("machine_state", {})
                         
                         latest = self.current_df.iloc[-1]
                         
@@ -760,7 +901,7 @@ class BrainService:
                             
                         # Determine the decision status, noting if we ignored a valid signal due to current state
                         if signal:
-                            if self.trader.current_trade is not None:
+                            if self.trader.trade_context is not None:
                                 decision_status = "IGNORED_OPEN_TRADE"
                                 lifecycle_stage = DecisionLifecycle.FILTERED.value
                                 if triggered_strategy:
@@ -886,12 +1027,12 @@ class BrainService:
                     if self.trader.pending_setup is not None:
                         # Sniper mode
                         self.trader.sniper_hunt(self.live_ltp, self.current_df, self.order_flow)
-                    elif self.trader.current_trade is not None:
+                    elif self.trader.trade_context is not None:
                         self.trader.manage_open_trade(self.live_ltp, self.current_df)
                         
                     # State transitions -> Send to Shadow ML via ZeroMQ
                     is_pending = self.trader.pending_setup is not None
-                    is_trade = self.trader.current_trade is not None
+                    is_trade = self.trader.trade_context is not None
                     
                     if was_pending:
                         recent_candles = self.current_df.tail(500).to_dict('records') if self.current_df is not None else None
@@ -940,9 +1081,9 @@ class BrainService:
                             logger.error(f"Strike Intelligence error: {e}")
                             
                     # Time stop research entry/exit transitions
-                    if not was_trade and self.trader.current_trade is not None:
+                    if not was_trade and self.trader.trade_context is not None:
                         # Sniper trade entered!
-                        trade = self.trader.current_trade
+                        trade = self.trader.trade_context
                         self.research_service.register_trade_entry(trade)
                         self.publish_notification(
                             event_type="BUY_EXECUTED",
@@ -954,7 +1095,7 @@ class BrainService:
                             instrument=trade.get('symbol', '--'),
                             premium=trade.get('entry_price')
                         )
-                    elif was_trade and self.trader.current_trade is None:
+                    elif was_trade and self.trader.trade_context is None:
                         # Trade exited!
                         if len(self.trader.history_list) > 0:
                             last_trade = self.trader.history_list[-1]
@@ -1084,9 +1225,9 @@ class BrainService:
                     
                     # Manage Option Subscription for Order Flow
                     opt_tokens = []
-                    if self.trader.current_trade:
-                        opt_tokens.append(self.trader.current_trade['token'])
-                        self.exec_pub.publish("EXEC.ACTIVE_TRADE", self.trader.current_trade)
+                    if self.trader.trade_context:
+                        opt_tokens.append(self.trader.trade_context['token'])
+                        self.exec_pub.publish("EXEC.ACTIVE_TRADE", self.trader.trade_context)
                     if self.trader.pending_setup:
                         opt_tokens.append(self.trader.pending_setup.get('candidate_token'))
                     opt_tokens.extend(self.research_service.get_observed_tokens())

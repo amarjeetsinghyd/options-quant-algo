@@ -28,8 +28,7 @@
                 </div>
                 <!-- Mode Selector -->
                 <div class="mode-selector">
-                    <button class="mode-btn active" id="btn-mode-auto" onclick="setDashboardMode('AUTO')">AUTO</button>
-                    <button class="mode-btn" id="btn-mode-live" onclick="setDashboardMode('LIVE')">LIVE</button>
+                    <button class="mode-btn active" id="btn-mode-live" onclick="setDashboardMode('LIVE')">LIVE</button>
                     <button class="mode-btn" id="btn-mode-research" onclick="setDashboardMode('RESEARCH')">RESEARCH</button>
                 </div>
             </div>
@@ -261,6 +260,23 @@
                         <div class="overview-item flex-col-align-start" style="margin-top: 5px;">
                             <span>Tick Rate Sparkline (Last 60s)</span>
                             <small id="tick-rate-sparkline" class="mono-font text-muted" style="font-size:12px; letter-spacing:1px; margin-top:2px;">▖▖▖▖▖▖▖▖▖▖</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- PANEL 5b: Virtual Capital Lock -->
+                <div class="card flat-panel col-span-1" id="virtual-lock-panel">
+                    <div class="card-header">
+                        <h2>[05b] VIRTUAL CAPITAL LOCK</h2>
+                    </div>
+                    <div class="overview-list" style="padding: 10px;">
+                        <div class="overview-item flex-col-align-start" style="border-bottom: none; gap: 8px;">
+                            <span style="font-size: 11px; color: var(--text-muted);">Amount reserved for withdrawal (₹)</span>
+                            <div style="display: flex; gap: 8px; width: 100%;">
+                                <input type="number" id="input-virtual-lock" placeholder="0" style="flex: 1; padding: 6px; background: var(--bg-dark); border: 1px solid var(--border); color: var(--text); font-family: var(--font-mono); border-radius: 4px; font-size: 12px;">
+                                <button onclick="applyVirtualLock()" style="padding: 6px 12px; background: var(--accent); color: #fff; border: none; cursor: pointer; border-radius: 4px; font-family: var(--font-main); font-weight: bold; font-size: 11px;">LOCK</button>
+                                <button onclick="resetVirtualLock()" style="padding: 6px 12px; background: var(--bg-hover); color: var(--text); border: 1px solid var(--border); cursor: pointer; border-radius: 4px; font-family: var(--font-main); font-weight: bold; font-size: 11px;">RESET</button>
+                            </div>
                         </div>
                     </div>
                 </div>

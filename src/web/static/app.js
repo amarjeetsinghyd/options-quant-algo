@@ -1,5 +1,5 @@
 // app.js — Bloomberg-style Operations & Research Console (QOT-Live v1.1.0)
-let dashboardMode = 'AUTO'; // 'AUTO', 'LIVE', or 'RESEARCH'
+let dashboardMode = 'LIVE'; // 'LIVE' or 'RESEARCH'
 let activeMode = 'LIVE';    // Resolved active mode: 'LIVE' or 'RESEARCH'
 let logSeverity = '';
 let isTapePaused = false;
@@ -25,7 +25,7 @@ let currentPollInterval = 5000;
 let missedPollsCount = 0;
 let lastPollLatencyMs = 0;
 
-document.addEventListener('DOMContentLoaded', () => {
+function initApp() {
     // Generate operator session ID if not exists
     if (!localStorage.getItem('operator_session_id')) {
         localStorage.setItem('operator_session_id', crypto.randomUUID());
@@ -67,7 +67,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Setup keyboard event listeners
     window.addEventListener('keydown', handleKeyboardShortcuts);
-});
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initApp);
+} else {
+    initApp();
+}
 
 function startPollingLoop() {
     if (pollTimeoutId) {
@@ -167,6 +173,7 @@ function refreshConsole() {
     safeFetch('dataset_health', fetchDatasetHealth);
     safeFetch('audit_status', fetchAuditStatus);
     safeFetch('time_stop_research', fetchTimeStopResearch);
+    safeFetch('virtual_lock', fetchVirtualLock);
     safeFetch('chart_data', renderOverlayCharts);
     
     if (activeMode === 'RESEARCH') {
@@ -199,36 +206,14 @@ function clearStaleBadge(panelId) {
 
 // 1. OPERATION MODES CONTROLLER (AUTO / LIVE / RESEARCH)
 function resolveActiveMode() {
-    if (dashboardMode === 'AUTO') {
-        const now = new Date();
-        const day = now.getDay();
-        const hour = now.getHours();
-        const min = now.getMinutes();
-        
-        // Trading hours: Mon-Fri (1 to 5), 09:15 to 15:30
-        const isWeekday = day >= 1 && day <= 5;
-        const timeVal = hour * 60 + min;
-        const isOpen = timeVal >= (9 * 60 + 15) && timeVal <= (15 * 60 + 30);
-        
-        if (isWeekday && isOpen) {
-            activeMode = 'LIVE';
-        } else {
-            activeMode = 'RESEARCH';
-        }
-    } else {
-        activeMode = dashboardMode;
-    }
-    
-    // Toggle UI views based on active resolved mode
-    const liveGroup = document.getElementById('live-mode-group');
-    const researchGroup = document.getElementById('research-mode-group');
+    activeMode = dashboardMode;
     
     if (activeMode === 'LIVE') {
-        liveGroup.style.display = '';
-        researchGroup.style.display = 'none';
+        document.getElementById('live-mode-group').style.display = 'grid';
+        document.getElementById('research-mode-group').style.display = 'none';
     } else {
-        liveGroup.style.display = 'none';
-        researchGroup.style.display = '';
+        document.getElementById('live-mode-group').style.display = 'none';
+        document.getElementById('research-mode-group').style.display = 'grid';
     }
 }
 
@@ -236,8 +221,7 @@ function setDashboardMode(mode) {
     dashboardMode = mode;
     
     document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
-    if (mode === 'AUTO') document.getElementById('btn-mode-auto').classList.add('active');
-    else if (mode === 'LIVE') document.getElementById('btn-mode-live').classList.add('active');
+    if (mode === 'LIVE') document.getElementById('btn-mode-live').classList.add('active');
     else if (mode === 'RESEARCH') document.getElementById('btn-mode-research').classList.add('active');
     
     refreshConsole();
@@ -1707,3 +1691,71 @@ async function fetchAndDrawMFEChart() {
 // Add to global refresh loop
 setInterval(fetchAndDrawMFEChart, 10000);
 fetchAndDrawMFEChart();
+
+// --- Virtual Capital Lock ---
+async function fetchVirtualLock() {
+    try {
+        const response = await fetch(`${window.location.origin}/api/capital/lock`, { cache: 'no-store' });
+        if (!response.ok) return;
+        const data = await response.json();
+        const input = document.getElementById('input-virtual-lock');
+        if (input && document.activeElement !== input) {
+            input.value = data.locked_withdrawal_amount || 0;
+        }
+    } catch (e) {
+        console.error("Virtual lock fetch error:", e);
+    }
+}
+
+async function applyVirtualLock() {
+    const input = document.getElementById('input-virtual-lock');
+    if (!input || input.value === '') return;
+    
+    const amount = parseFloat(input.value);
+    if (isNaN(amount) || amount < 0) {
+        alert("Please enter a valid positive number for lock amount.");
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${window.location.origin}/api/capital/lock`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ amount: amount })
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            input.value = data.locked_withdrawal_amount;
+            alert("Virtual Capital Lock applied successfully: ₹" + data.locked_withdrawal_amount);
+        } else {
+            const err = await response.json();
+            alert("Failed to apply lock: " + (err.error || "Unknown error"));
+        }
+    } catch (e) {
+        console.error("Apply lock error:", e);
+        alert("Connection error while applying lock.");
+    }
+}
+
+async function resetVirtualLock() {
+    try {
+        const response = await fetch(`${window.location.origin}/api/capital/lock`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ amount: 0 })
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            document.getElementById('input-virtual-lock').value = '';
+            alert('Virtual Capital Lock reset successfully. All funds available.');
+        } else {
+            alert('Failed to reset lock.');
+        }
+    } catch (e) {
+        console.error('Reset lock error:', e);
+        alert('Connection error while resetting lock.');
+    }
+}
+

@@ -66,6 +66,10 @@ class FeedService:
         try:
             if self.eq_tokens:
                 self.broker.market_data_provider.subscribe(self.eq_tokens, exchange="NSE")
+                # Indices on Shoonya are sometimes under IDX. We blindly subscribe to both.
+                idx_tokens = [t for t in self.eq_tokens if t in ["26000", "26009", "26017", "99926000", "99926017"]]
+                if idx_tokens:
+                    self.broker.market_data_provider.subscribe(idx_tokens, exchange="IDX")
             if self.deriv_tokens:
                 self.broker.market_data_provider.subscribe(self.deriv_tokens, exchange="NFO")
             

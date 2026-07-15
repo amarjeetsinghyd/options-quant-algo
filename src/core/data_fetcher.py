@@ -105,8 +105,8 @@ SENSEX_CONSTITUENTS = {
 }
 
 # Cash Index tokens
-NIFTY_CASH_TOKEN = "99926000"
-SENSEX_CASH_TOKEN = "99919000"
+NIFTY_CASH_TOKEN = "26000"
+SENSEX_CASH_TOKEN = "1"
 
 class DataFetcher:
     def __init__(self, broker_gateway):
@@ -144,6 +144,23 @@ class DataFetcher:
     def get_active_constituents(self):
         """Returns the correct constituent list for the active instrument."""
         name, _ = self.get_active_instrument()
+        
+        # Try to load dynamic constituents first
+        json_path = os.path.join(os.path.dirname(__file__), '../../institutional_memory/constituents.json')
+        if os.path.exists(json_path):
+            try:
+                with open(json_path, 'r') as f:
+                    data = json.load(f)
+                    
+                # Basic validation
+                if name == "NIFTY" and "nifty_50" in data and len(data["nifty_50"]) >= 45:
+                    return data["nifty_50"]
+                elif name == "SENSEX" and "sensex_30" in data and len(data["sensex_30"]) >= 25:
+                    return data["sensex_30"]
+            except Exception as e:
+                logger.error(f"Failed to load dynamic constituents, falling back to hardcoded: {e}")
+                
+        # Fallback to hardcoded dictionaries
         if name == "NIFTY":
             return NIFTY_CONSTITUENTS
         else:

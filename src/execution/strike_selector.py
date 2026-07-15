@@ -53,21 +53,15 @@ class StrikeSelector:
         opts = weekly_opts[weekly_opts['symbol'].str.endswith(opt_type)]
         
         atm_strike = StrikeSelector.calculate_atm_strike(index_price, index_name)
-        otm_strikes = StrikeSelector.get_otm_strikes(atm_strike, signal_type, index_name)
+        otm_strikes = StrikeSelector.get_otm_strikes(atm_strike, signal_type, index_name, max_depth=20)
         
         remaining_funds = available_funds
-        allocations = []
-
+        
+        # Step 1: Gather valid options and their costs
+        valid_opts = []
         for target_strike in otm_strikes:
-            if remaining_funds <= 0:
-                break
-                
-            # Angel One stores strike as strike * 100 (e.g., 2500000)
-            # Shoonya stores strike as strike (e.g., 25000)
-            # We check both to remain broker agnostic.
             strike_angel = int(target_strike * 100)
             strike_shoonya = int(target_strike)
-            
             opts_strike_int = opts['strike'].astype(float).astype(int)
             match = opts[(opts_strike_int == strike_angel) | (opts_strike_int == strike_shoonya)]
             
@@ -76,22 +70,63 @@ class StrikeSelector:
                 
             opt_row = match.iloc[0]
             token = str(opt_row['token'])
-            
-            # option_cache might store keys as str or int depending on adapter
             ltp = option_cache.get(token) or option_cache.get(int(token)) if token.isdigit() else None
             
-            if ltp is None:
-                continue
-                
-            cost_per_lot = ltp * lot_size
-            
+            if ltp is not None and ltp > 0:
+                valid_opts.append((opt_row, ltp, ltp * lot_size))
+
+        if not valid_opts:
+            return []
+
+        # Step 2: Find the FIRST affordable OTM strike
+        start_idx = -1
+        for i, (opt_row, ltp, cost_per_lot) in enumerate(valid_opts):
             if cost_per_lot <= remaining_funds:
-                # Buy 1 lot of the nearest affordable OTM
-                allocations.append((opt_row, 1, ltp))
-                remaining_funds -= cost_per_lot
-                logger.info(f"[StrikeSelector] Selected {opt_row['symbol']} at {ltp} (Cost: {cost_per_lot:.2f}). Remaining funds: {remaining_funds:.2f}")
-        
-        if not allocations:
+                start_idx = i
+                break
+                
+        if start_idx == -1:
             logger.warning(f"[StrikeSelector] No affordable OTM strikes found for funds: {available_funds}")
-            
-        return allocations
+            return []
+
+        # Step 3: Forward Ladder (up to 5 OTMs)
+        allocations_dict = {}
+        ladder_end_idx = min(start_idx + 5, len(valid_opts))
+        
+        for i in range(start_idx, ladder_end_idx):
+            opt_row, ltp, cost_per_lot = valid_opts[i]
+            if remaining_funds >= cost_per_lot:
+                allocations_dict[i] = allocations_dict.get(i, 0) + 1
+                remaining_funds -= cost_per_lot
+            else:
+                # If we cannot afford the immediate next consecutive OTM, we halt the forward ladder.
+                break
+
+        # Step 4: Reverse Sweep (looping back from the furthest reached OTM down to the 1st)
+        if allocations_dict:
+            max_idx = max(allocations_dict.keys())
+            while True:
+                allocated_in_sweep = False
+                for i in range(max_idx, start_idx - 1, -1):
+                    opt_row, ltp, cost_per_lot = valid_opts[i]
+                    if remaining_funds >= cost_per_lot:
+                        allocations_dict[i] += 1
+                        remaining_funds -= cost_per_lot
+                        allocated_in_sweep = True
+                
+                # If we couldn't afford ANY lots during the entire reverse pass, we are done
+                if not allocated_in_sweep:
+                    break
+                    
+        # Step 5: Format output
+        final_allocations = []
+        # Return allocations ordered from ITM-most to OTM-most
+        for i in sorted(allocations_dict.keys()):
+            qty = allocations_dict[i]
+            if qty > 0:
+                opt_row, ltp, cost_per_lot = valid_opts[i]
+                final_allocations.append((opt_row, qty, ltp))
+                logger.info(f"[StrikeSelector] Selected {qty} lot(s) of {opt_row['symbol']} at {ltp} (Total Cost: {qty * cost_per_lot:.2f}).")
+                
+        logger.info(f"[StrikeSelector] Pyramiding complete. Remaining funds: {remaining_funds:.2f}")
+        return final_allocations

@@ -21,6 +21,7 @@ class ExecutionManager:
         self.order_lifecycle = order_lifecycle if order_lifecycle else PaperOrderLifecycle()
         self.trades_today = 0
         self.trade_context = None
+        self.current_trade = None  # defensive alias for stale log compatibility
         self.pending_setup = None
         self.cooldown_until = None
         self.last_trade_date = None
@@ -323,9 +324,11 @@ class ExecutionManager:
                 elif hwm_pct > 0.07:
                     target_sl_price = entry * 1.0   # SL to Breakeven
                 
-                # Theta Check (3 minutes elapsed and profit 0-5%)
-                if duration >= 180 and 0.0 <= profit_pct <= 0.05:
-                    self._close_all_legs(current_nifty_df, "Theta Decay Abort (0-5% after 3 mins)")
+                # Theta Check (3 minutes elapsed and profit < 5%)
+                # Exit if trade hasn't crossed +5% threshold — covers both losses and marginal gains.
+                # A trade stuck below +5% at 180s has missed the gamma burst and is now bleeding theta.
+                if duration >= 180 and profit_pct < 0.05:
+                    self._close_all_legs(current_nifty_df, f"Theta Decay Abort (<5% after 3 mins, P&L: {profit_pct*100:.1f}%)")
                     return
                     
             # Default 20% initial SL if not trailing yet

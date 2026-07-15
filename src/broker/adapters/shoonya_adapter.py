@@ -315,22 +315,7 @@ class ShoonyaOrderLifecycle(OrderLifecycle):
     def execute_entry(self, leg: TradeLeg) -> bool:
         logger.info(f"[ShoonyaOrderLifecycle] Initiating Entry for {leg.symbol} (Qty: {leg.quantity})")
         try:
-            # Fetch fresh LTP for marketable limit order
-            ltp = float(leg.entry_price or 0.0)
-            try:
-                quote = self.exec_provider._api.get_quotes(exchange="NFO", token=leg.token)
-                if quote and "lp" in quote:
-                    ltp = float(quote["lp"])
-            except Exception as e:
-                logger.warning(f"[ShoonyaOrderLifecycle] Could not fetch fresh LTP, using entry_price: {e}")
-
-            if ltp <= 0:
-                logger.error("[ShoonyaOrderLifecycle] Invalid LTP for entry.")
-                return False
-
-            buffer = max(0.5, ltp * 0.015)
-            limit_price = round((ltp + buffer) / 0.05) * 0.05
-
+            # Entry is MKT to ensure instant execution
             resp = self.exec_provider.place_order(
                 buy_or_sell="B",
                 product_type="I",
@@ -338,15 +323,15 @@ class ShoonyaOrderLifecycle(OrderLifecycle):
                 tradingsymbol=leg.symbol,
                 quantity=leg.quantity,
                 discloseqty=0,
-                price_type="LMT",
-                price=limit_price,
+                price_type="MKT",
+                price=0,
                 retention="DAY"
             )
             
             if resp and resp.get("stat") == "Ok":
                 leg.broker_order_id = resp.get("norenordno")
                 leg.status = "OPEN"
-                logger.info(f"[ShoonyaOrderLifecycle] Entry Placed. OrderNo: {leg.broker_order_id} at Limit: {limit_price}")
+                logger.info(f"[ShoonyaOrderLifecycle] Entry Placed. OrderNo: {leg.broker_order_id} at MKT")
                 return True
             else:
                 logger.error(f"[ShoonyaOrderLifecycle] Entry Failed: {resp}")
@@ -516,32 +501,38 @@ class ShoonyaHistoricalProvider(IHistoricalProvider):
                 # time -> timestamp, into -> open, inth -> high, intl -> low, intc -> close, intv -> volume
                 # Shoonya daily price series format mapping:
                 # time -> timestamp, into -> open, inth -> high, intl -> low, intc -> close, intv -> volume
-                rename_map = {
-                    'time': 'timestamp',
-                    'ssboe': 'timestamp',  # Some endpoints return ssboe for timestamp
-                    'into': 'open',
-                    'inth': 'high',
-                    'intl': 'low',
-                    'intc': 'close',
-                    'intv': 'volume',
-                    'v': 'volume', # Daily might just use v
-                }
-                
-                df.rename(columns=rename_map, inplace=True)
+                if 'time' in df.columns: df['timestamp'] = df['time']
+                elif 'ssboe' in df.columns: df['timestamp'] = df['ssboe']
+                if 'into' in df.columns: df['open'] = df['into']
+                if 'inth' in df.columns: df['high'] = df['inth']
+                if 'intl' in df.columns: df['low'] = df['intl']
+                if 'intc' in df.columns: df['close'] = df['intc']
+                if 'intv' in df.columns: df['volume'] = df['intv']
+                elif 'v' in df.columns: df['volume'] = df['v']
                 
                 # Standardize columns
                 required_cols = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
                 for col in required_cols:
                     if col not in df.columns:
                         df[col] = 0
-                
+
+                # Guard against duplicate columns (Shoonya sometimes returns dup column names)
+                if df.columns.duplicated().any():
+                    df = df.loc[:, ~df.columns.duplicated()]
+
                 df = df[required_cols]
-                
-                # Convert timestamp
-                if df['timestamp'].dtype == 'O': # string format
-                    df['timestamp'] = pd.to_datetime(df['timestamp'], format='mixed', dayfirst=True)
-                else: # numerical
-                    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
+
+                # Convert timestamp — safely handle the case where df['timestamp']
+                # returns a DataFrame (duplicate columns) instead of a Series.
+                ts_col = df['timestamp']
+                if isinstance(ts_col, pd.DataFrame):
+                    ts_col = ts_col.iloc[:, 0]
+                ts_dtype = ts_col.dtype
+
+                if ts_dtype == 'O':  # string format
+                    df['timestamp'] = pd.to_datetime(ts_col, format='mixed', dayfirst=True)
+                else:  # numerical (unix seconds)
+                    df['timestamp'] = pd.to_datetime(ts_col, unit='s')
                     
                 # Convert to numeric
                 for col in ['open', 'high', 'low', 'close', 'volume']:

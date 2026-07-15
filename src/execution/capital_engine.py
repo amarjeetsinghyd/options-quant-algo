@@ -20,6 +20,7 @@ class CapitalEngine:
         self.mode = mode
         self.portfolio_provider = portfolio_provider
         self._paper_capital = INITIAL_PAPER_CAPITAL
+        self._locked_amount = 0.0
 
         if self.mode == "PAPER":
             self._load_state()
@@ -30,31 +31,37 @@ class CapitalEngine:
                 with open(self.STATE_FILE, "r") as f:
                     data = json.load(f)
                     self._paper_capital = float(data.get("available_funds", INITIAL_PAPER_CAPITAL))
-                logger.info(f"[CapitalEngine] Loaded paper capital state: {self._paper_capital}")
+                    self._locked_amount = float(data.get("locked_withdrawal_amount", 0.0))
+                logger.info(f"[CapitalEngine] Loaded paper capital state: {self._paper_capital}, Locked: {self._locked_amount}")
             except Exception as e:
                 logger.error(f"[CapitalEngine] Failed to load state: {e}. Defaulting to {INITIAL_PAPER_CAPITAL}")
                 self._paper_capital = INITIAL_PAPER_CAPITAL
+                self._locked_amount = 0.0
                 self._save_state()
         else:
             logger.info(f"[CapitalEngine] First run. Initializing paper capital: {self._paper_capital}")
             self._save_state()
 
     def _save_state(self):
-        if self.mode != "PAPER":
-            return
+        # Always save state because locked_amount can apply to LIVE mode too
         os.makedirs(os.path.dirname(self.STATE_FILE), exist_ok=True)
         try:
             with open(self.STATE_FILE, "w") as f:
-                json.dump({"available_funds": self._paper_capital}, f, indent=4)
+                json.dump({"available_funds": self._paper_capital, "locked_withdrawal_amount": self._locked_amount}, f, indent=4)
         except Exception as e:
             logger.error(f"[CapitalEngine] Failed to save state: {e}")
 
     def get_available_funds(self) -> float:
+        # Reload state to fetch the latest locked_amount updated by the QOT Console Controller
+        self._load_state()
         if self.mode == "LIVE":
             if not self.portfolio_provider:
                 raise ValueError("Portfolio provider is required for LIVE mode")
-            return float(self.portfolio_provider.get_available_funds())
-        return self._paper_capital
+            base = float(self.portfolio_provider.get_available_funds())
+        else:
+            base = self._paper_capital
+            
+        return max(0.0, base - self._locked_amount)
 
     def deduct_funds(self, amount: float):
         if self.mode == "PAPER":

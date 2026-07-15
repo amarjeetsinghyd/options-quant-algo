@@ -690,3 +690,166 @@ class SignalGenerator:
         return None, decision_state
 
 
+
+    def check_vwap_band_breakout_signal(self, df, generate_trace: bool = False):
+        """
+        VWAP Band Breakout Strategy (Strategy 3).
+        CALL: Price crosses above vwap_low AND vfi > 0.
+        PUT: Price crosses below vwap_high AND vfi < 0.
+        """
+        params = STRATEGY_CONSTANTS["VWAP_BAND_BREAKOUT"]
+        min_bars = params["min_data_bars"]
+        ratio = params["band_proximity_ratio"]
+ 
+        decision_state = {
+            "human_reason": "Not enough data",
+            "machine_state": {"bars": len(df)},
+            "rule_evaluations": []
+        }
+
+        if len(df) < min_bars:
+            if generate_trace:
+                rule_evals = [
+                    RuleEvaluation(
+                        rule_id="S3_DATA_LENGTH", rule_category="FILTER",
+                        input_values={"bars": len(df)}, threshold_values={"min_bars": min_bars},
+                        result=False, human_explanation=f"Data length {len(df)} is less than required {min_bars} bars"
+                    )
+                ]
+                decision_state["rule_evaluations"] = [asdict(r) for r in rule_evals]
+            return None, decision_state
+            
+        latest = df.iloc[-1]
+        prev = df.iloc[-2]
+        
+        call_required_close = latest['vwap_low'] + ratio * (latest['vwap'] - latest['vwap_low'])
+        prev_below_vwap_low = prev['close'] <= latest['vwap_low']
+        vfi_positive = latest['vfi'] > 0
+        call_trigger = bool(
+            latest['close'] >= call_required_close and 
+            prev_below_vwap_low and 
+            vfi_positive
+        )
+        
+        put_required_close = latest['vwap_high'] - ratio * (latest['vwap_high'] - latest['vwap'])
+        prev_above_vwap_high = prev['close'] >= latest['vwap_high']
+        vfi_negative = latest['vfi'] < 0
+        put_trigger = bool(
+            latest['close'] <= put_required_close and 
+            prev_above_vwap_high and 
+            vfi_negative
+        )
+        
+        strategy_state = {
+            "bars": len(df),
+            "call_trigger_attempt": call_trigger,
+            "put_trigger_attempt": put_trigger,
+            "latest_close": float(latest['close']),
+            "latest_vwap_low": float(latest['vwap_low']),
+            "latest_vwap_high": float(latest['vwap_high']),
+            "latest_vfi": float(latest['vfi']),
+            "call_required_close": float(call_required_close),
+            "put_required_close": float(put_required_close),
+            "prev_below_vwap_low": prev_below_vwap_low,
+            "prev_above_vwap_high": prev_above_vwap_high,
+            "vfi_positive": vfi_positive,
+            "vfi_negative": vfi_negative,
+            "reason_trace": []
+        }
+        decision_state["machine_state"].update(strategy_state)
+        decision_state["machine_state"]["strategy_3_state"] = strategy_state
+        
+        if not (call_trigger or put_trigger):
+            decision_state["human_reason"] = "Conditions not aligned for VWAP band breakout"
+            if not call_trigger:
+                strategy_state["reason_trace"].append(
+                    f"CALL fail: close={latest['close']} < required={call_required_close} or prev_above_vwap_low={not prev_below_vwap_low} or vfi_positive={vfi_positive}"
+                )
+            if not put_trigger:
+                strategy_state["reason_trace"].append(
+                    f"PUT fail: close={latest['close']} > required={put_required_close} or prev_above_vwap_high={not prev_above_vwap_high} or vfi_negative={vfi_negative}"
+                )
+            if generate_trace:
+                rule_evals = [
+                    RuleEvaluation(
+                        rule_id="S3_DATA_LENGTH", rule_category="FILTER",
+                        input_values={"bars": len(df)}, threshold_values={"min_bars": min_bars},
+                        result=True, human_explanation="Data length meets criteria"
+                    ),
+                    RuleEvaluation(
+                        rule_id="S3_TRIGGER_ALIGNMENT", rule_category="TRIGGER",
+                        input_values={
+                            "close": float(latest['close']), "prev_close": float(prev['close']),
+                            "vwap_low": float(latest['vwap_low']), "vwap_high": float(latest['vwap_high']),
+                            "vfi": float(latest['vfi'])
+                        },
+                        threshold_values={"ratio": ratio},
+                        result=False, human_explanation="VWAP SD-band boundary close breakout conditions not met"
+                    )
+                ]
+                decision_state["rule_evaluations"] = [asdict(r) for r in rule_evals]
+            return None, decision_state
+            
+        if call_trigger:
+            decision_state["human_reason"] = "Conditions met for CALL VWAP Band Breakout"
+            strategy_state["reason_trace"].append("Conditions met for CALL VWAP Band Breakout")
+            if generate_trace:
+                rule_evals = [
+                    RuleEvaluation(
+                        rule_id="S3_DATA_LENGTH", rule_category="FILTER",
+                        input_values={"bars": len(df)}, threshold_values={"min_bars": min_bars},
+                        result=True, human_explanation="Data length meets criteria"
+                    ),
+                    RuleEvaluation(
+                        rule_id="S3_TRIGGER_ALIGNMENT", rule_category="TRIGGER",
+                        input_values={
+                            "close": float(latest['close']), "prev_close": float(prev['close']),
+                            "vwap_low": float(latest['vwap_low']), "vfi": float(latest['vfi'])
+                        },
+                        threshold_values={"ratio": ratio},
+                        result=True, human_explanation="Price breakout past inner SD VWAP-low band confirmed with positive VFI flow"
+                    )
+                ]
+                decision_state["rule_evaluations"] = [asdict(r) for r in rule_evals]
+
+            signal = {
+                "type": "CALL",
+                "strategy": "VWAP_BAND_BREAKOUT",
+                "master_high": float(latest['high']),
+                "master_low": float(latest['low']),
+                "timestamp": latest['timestamp'].isoformat() if hasattr(latest['timestamp'], 'isoformat') else str(latest['timestamp'])
+            }
+            return signal, decision_state
+            
+        if put_trigger:
+            decision_state["human_reason"] = "Conditions met for PUT VWAP Band Breakout"
+            strategy_state["reason_trace"].append("Conditions met for PUT VWAP Band Breakout")
+            if generate_trace:
+                rule_evals = [
+                    RuleEvaluation(
+                        rule_id="S3_DATA_LENGTH", rule_category="FILTER",
+                        input_values={"bars": len(df)}, threshold_values={"min_bars": min_bars},
+                        result=True, human_explanation="Data length meets criteria"
+                    ),
+                    RuleEvaluation(
+                        rule_id="S3_TRIGGER_ALIGNMENT", rule_category="TRIGGER",
+                        input_values={
+                            "close": float(latest['close']), "prev_close": float(prev['close']),
+                            "vwap_high": float(latest['vwap_high']), "vfi": float(latest['vfi'])
+                        },
+                        threshold_values={"ratio": ratio},
+                        result=True, human_explanation="Price breakout past inner SD VWAP-high band confirmed with negative VFI flow"
+                    )
+                ]
+                decision_state["rule_evaluations"] = [asdict(r) for r in rule_evals]
+
+            signal = {
+                "type": "PUT",
+                "strategy": "VWAP_BAND_BREAKOUT",
+                "master_high": float(latest['high']),
+                "master_low": float(latest['low']),
+                "timestamp": latest['timestamp'].isoformat() if hasattr(latest['timestamp'], 'isoformat') else str(latest['timestamp'])
+            }
+            return signal, decision_state
+            
+        return None, decision_state
