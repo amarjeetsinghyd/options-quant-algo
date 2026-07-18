@@ -13,5 +13,8 @@
   "dependencies": {
     "electron": "^31.0.0",
     "pm2": "^7.0.1"
+  },
+  "devDependencies": {
+    "@reticlehq/react": "^2.0.0"
   }
 }

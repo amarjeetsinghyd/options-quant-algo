@@ -705,14 +705,14 @@ class BrainService:
                             # Inject Virtual Candle
                             live_ts = pd.Timestamp(now.replace(second=0, microsecond=0))
                             # Guard against duplicate columns before accessing .dtype
-            if price_df.columns.duplicated().any():
-                price_df = price_df.loc[:, ~price_df.columns.duplicated()]
+                            if price_df.columns.duplicated().any():
+                                price_df = price_df.loc[:, ~price_df.columns.duplicated()]
 
-            ts_col = price_df['timestamp']
-            if isinstance(ts_col, pd.DataFrame):
-                ts_col = ts_col.iloc[:, 0]
+                            ts_col = price_df['timestamp']
+                            if isinstance(ts_col, pd.DataFrame):
+                                ts_col = ts_col.iloc[:, 0]
 
-            if getattr(ts_col.dtype, 'tz', None) is not None:
+                            if getattr(ts_col.dtype, 'tz', None) is not None:
                                 live_ts = live_ts.tz_localize(price_df['timestamp'].dtype.tz)
                                 
                             live_vol = sum(self.current_minute_volume_tracker.values())

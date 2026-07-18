@@ -6,7 +6,7 @@ import threading
 import psutil
 import pandas as pd
 from collections import deque
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 import zmq
 
@@ -18,18 +18,26 @@ from src.utils.market_calendar import is_trading_day
 
 logger = get_logger("health_service")
 
+
+def _zmq_addr(port: int) -> str:
+    """Return the ZMQ address for the given port, matching message_bus._addr_str()."""
+    if sys.platform != "win32":
+        return f"ipc:///tmp/quant_{port}"
+    return f"tcp://127.0.0.1:{port}"
+
+
 class PassiveHealthMonitor:
     def __init__(self):
         self.running = False
-        
-        # ZMQ Context
-        self.context = zmq.Context()
+
+        # ZMQ Context — use shared singleton (consistent with post-hotfix message_bus.py)
+        self.context = zmq.Context.instance()
         self.feed_sub = self.context.socket(zmq.SUB)
-        self.feed_sub.connect(f"tcp://127.0.0.1:{FEED_PORT}")
+        self.feed_sub.connect(_zmq_addr(FEED_PORT))
         self.feed_sub.setsockopt_string(zmq.SUBSCRIBE, "TICK")
-        
+
         self.exec_sub = self.context.socket(zmq.SUB)
-        self.exec_sub.connect(f"tcp://127.0.0.1:{EXEC_PORT}")
+        self.exec_sub.connect(_zmq_addr(EXEC_PORT))
         self.exec_sub.setsockopt_string(zmq.SUBSCRIBE, "SIGNAL")
         
         # State
@@ -70,10 +78,13 @@ class PassiveHealthMonitor:
                 pass
                 
     def get_process_info(self, script_name):
+        # Strip .py extension so we match both script invocation
+        # (python feed_service.py) and module invocation (python -m src.services.feed_service)
+        match_name = script_name.removesuffix('.py') if isinstance(script_name, str) else script_name
         for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'create_time', 'cpu_percent', 'memory_info']):
             try:
                 cmdline = proc.info['cmdline']
-                if cmdline and script_name in ' '.join(cmdline):
+                if cmdline and match_name in ' '.join(cmdline):
                     uptime = time.time() - proc.info['create_time']
                     return {
                         "status": "Healthy",

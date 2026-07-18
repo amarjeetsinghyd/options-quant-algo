@@ -40,18 +40,16 @@ class MessageBusPublisher:
         return f"tcp://127.0.0.1:{self.port}"
 
     def _init_socket(self):
-        """Create (or recreate) the ZMQ context + PUB socket and bind."""
-        # Clean up any existing socket/context first
+        """Create (or recreate) the PUB socket and bind. Uses the shared ZMQ context singleton."""
         try:
             if self.socket is not None:
                 self.socket.close(linger=0)
         except Exception:
             pass
-        try:
-            if self.context is not None:
-                self.context.term()
-        except Exception:
-            pass
+        # Do NOT terminate the shared context (zmq.Context.instance()).
+        # Other sockets (Subscriber, other Publishers) may still be using it;
+        # terminating it here would cascade ENOTSOCK to all peers on every
+        # Publisher reconnect — the exact failure ADR-0001 is designed to prevent.
 
         self.context = zmq.Context.instance()
         self.socket = self.context.socket(zmq.PUB)
