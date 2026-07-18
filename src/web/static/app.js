@@ -26,9 +26,18 @@ let missedPollsCount = 0;
 let lastPollLatencyMs = 0;
 
 function initApp() {
-    // Generate operator session ID if not exists
+    // Generate operator session ID if not exists (with safe fallback for non-secure HTTP contexts)
     if (!localStorage.getItem('operator_session_id')) {
-        localStorage.setItem('operator_session_id', crypto.randomUUID());
+        let uuidVal;
+        try {
+            uuidVal = crypto.randomUUID();
+        } catch (e) {
+            uuidVal = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+                const r = Math.random() * 16 | 0;
+                return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+            });
+        }
+        localStorage.setItem('operator_session_id', uuidVal);
     }
     
     // Load notification filters

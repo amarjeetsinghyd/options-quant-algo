@@ -12,12 +12,13 @@ Corrective patch to address morning boot indicator calculation failures and ZMQ/
 - **Shoonya Index Exchange Mapping (`src/broker/adapters/shoonya_adapter.py`):** Added an exchange mapping override inside `ShoonyaHistoricalProvider.get_historical()`. If an index token (e.g. `26000`, `99926000`) is queried with exchange `NSE` or `BSE`, the adapter dynamically overrides the exchange segment to `IDX`. This resolves the `Empty DataFrame` error where Nifty index candles were rejected on the `NSE` segment historically, restoring end-to-end historical REST fetch.
 - **Inverted Boot Priority (`src/services/brain_service.py`):** Changed `boot_sequence` to check the calendar day's boot stamp (`.boot_fetched_{today}`) *before* loading disk cache. If the stamp does not exist (first boot of the day), the engine always performs a full historical REST fetch to load a clean 2-day history (~750 bars with constituent volume), ensuring the minimum 130-candle indicator requirement is met immediately at startup. Mid-session reboots (stamp exists) continue to load from disk and run `BootGapFill` for the short gap.
 - **REST Fetch Length Validation (`src/services/brain_service.py`):** Added safety assertion requiring `len(live_df) >= 130` before declaring boot complete from REST. Fails back to local cache or warmup mode if the API returns insufficient data.
+- **HTTP Secure Context randomUUID Fix (`src/web/static/app.js`):** Replaced `crypto.randomUUID()` in the browser initialization routine with a try-catch fallback to a standard pseudo-random RFC4122 UUID generator. In non-secure contexts (such as loading the dashboard over HTTP on Oracle VPS's static IP), `crypto.randomUUID` is undefined, causing a silent TypeError that completely halted script initialization. The fallback restores seamless operations console load over HTTP.
 
 ### Added
 - **Warmup Status Telemetry (`src/services/brain_service.py`):** Added a `warmup_status` string (`READY`, `WARMING_UP (X/130)`, or `NO_DATA`) to the telemetry payload published to the dashboard, providing visual clarity on data loading state.
 
 ### Infrastructure
-- **Deployment:** Patched `shoonya_adapter.py` and `brain_service.py` deployed to Oracle Cloud VPS (`137.23.41.38`) via SCP. Syntax compiled cleanly.
+- **Deployment:** Patched `shoonya_adapter.py`, `brain_service.py`, and `app.js` deployed to Oracle Cloud VPS (`137.23.41.38`) via SCP. Syntax compiled cleanly.
 - **Agent Signature:** Diagnostic, token mapping discovery, and fixes applied by **GitHub Antigravity (builtin:zai-start-plan/GLM-5.2)** on 2026-07-18.
 
 ---
