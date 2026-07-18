@@ -140,6 +140,50 @@ class BrainService:
         except Exception as e:
             logger.error(f"[BrainService] Failed to publish notification: {e}")
 
+    def _boot_from_local_disk(self, dfs):
+        import pandas as pd
+        from datetime import datetime
+        boot_df = pd.concat(dfs, ignore_index=True)
+        boot_df['timestamp'] = pd.to_datetime(boot_df['timestamp'])
+        boot_df = boot_df.drop_duplicates(subset=['timestamp']).sort_values('timestamp')
+        
+        # Keep only last 2 days of trading data (~750 minutes)
+        boot_df = boot_df.tail(750).reset_index(drop=True)
+        
+        # 1GB Memory Optimization: Downcast 64-bit to 32-bit types
+        fcols = boot_df.select_dtypes('float').columns
+        icols = boot_df.select_dtypes('integer').columns
+        boot_df[fcols] = boot_df[fcols].astype('float32')
+        boot_df[icols] = boot_df[icols].astype('int32')
+        
+        logger.info(f"=== BOOT: Loaded {len(boot_df)} historical rows from local disk ===")
+        
+        self.cached_volume_df = boot_df.set_index('timestamp')[['synth_vol']]
+        self.cached_price_df = boot_df.set_index('timestamp')[['open', 'high', 'low', 'close']]
+        
+        with self._df_lock:
+            self.current_df = boot_df
+        
+        logger.info("=== BOOT COMPLETE: Engine Online from Local Disk ===")
+        # Run an initial cleanup on boot
+        self._cleanup_old_indicator_streams(datetime.now())
+
+    def _boot_empty_warmup(self):
+        import pandas as pd
+        empty_df = pd.DataFrame({
+            'timestamp': pd.Series(dtype='datetime64[ns]'),
+            'open': pd.Series(dtype='float32'),
+            'high': pd.Series(dtype='float32'),
+            'low': pd.Series(dtype='float32'),
+            'close': pd.Series(dtype='float32'),
+            'synth_vol': pd.Series(dtype='int32')
+        })
+        self.cached_volume_df = empty_df.set_index('timestamp')[['synth_vol']]
+        self.cached_price_df = empty_df.set_index('timestamp')[['open', 'high', 'low', 'close']]
+        with self._df_lock:
+            self.current_df = empty_df
+        logger.info("=== BOOT COMPLETE: Engine Online (Warmup Mode — REST quota protected) ===")
+
     def boot_sequence(self):
         logger.info("=== BOOT: Bootstrapping Brain from Local Disk Cache (Trailing 2-Day Indicator Stream) ===")
         try:
@@ -148,11 +192,13 @@ class BrainService:
 
             from src.config.engineering_config import INSTITUTIONAL_MEMORY_DIR
             from pathlib import Path
-            import pyarrow.parquet as pq
             import pandas as pd
 
             stream_dir = Path(INSTITUTIONAL_MEMORY_DIR) / "indicator_stream"
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            boot_stamp_file = Path(INSTITUTIONAL_MEMORY_DIR) / "indicator_stream" / f".boot_fetched_{today_str}"
 
+            # Gather local files in case we need them as fallback
             dfs = []
             if stream_dir.exists():
                 all_files = sorted(list(stream_dir.rglob("*.parquet")))
@@ -163,110 +209,59 @@ class BrainService:
                     except Exception as e:
                         logger.warning(f"Failed to read parquet file {pf}: {e}")
 
-            if dfs:
-                boot_df = pd.concat(dfs, ignore_index=True)
-                boot_df['timestamp'] = pd.to_datetime(boot_df['timestamp'])
-                boot_df = boot_df.drop_duplicates(subset=['timestamp']).sort_values('timestamp')
-                
-                # Keep only last 2 days of trading data (~750 minutes)
-                boot_df = boot_df.tail(750).reset_index(drop=True)
-                
-                # 1GB Memory Optimization: Downcast 64-bit to 32-bit types
-                fcols = boot_df.select_dtypes('float').columns
-                icols = boot_df.select_dtypes('integer').columns
-                boot_df[fcols] = boot_df[fcols].astype('float32')
-                boot_df[icols] = boot_df[icols].astype('int32')
-                
-                logger.info(f"=== BOOT: Loaded {len(boot_df)} historical rows from local disk ===")
-                
-                self.cached_volume_df = boot_df.set_index('timestamp')[['synth_vol']]
-                self.cached_price_df = boot_df.set_index('timestamp')[['open', 'high', 'low', 'close']]
-                
-                with self._df_lock:
-                    self.current_df = boot_df
-                
-                logger.info("=== BOOT COMPLETE: Engine Online from Local Disk ===")
-                
-                # Run an initial cleanup on boot
-                self._cleanup_old_indicator_streams(datetime.now())
-            else:
-                logger.warning("=== BOOT WARNING: No local disk cache found. Checking if REST fetch is needed... ===")
-                # Guard: Only fetch from REST API ONCE per calendar day.
-                # If the machine reboots mid-session, the indicator_stream will already
-                # have today's candles saved to disk (from the previous session run), so
-                # the `if dfs:` branch above will handle it. This path only runs on the
-                # VERY FIRST boot of the day (e.g., pre-market or after overnight cleanup).
-                # Calling get_historical_candles_with_synthetic_volume fetches 50+ REST
-                # calls (all Nifty constituents). Doing this on every reboot would starve
-                # the exit strategy of its API quota.
-                today_str = datetime.now().strftime("%Y-%m-%d")
-                boot_stamp_file = Path(INSTITUTIONAL_MEMORY_DIR) / "indicator_stream" / f".boot_fetched_{today_str}"
+            # 1. First Boot of the Day (No stamp exists) -> Always REST fetch
+            if not boot_stamp_file.exists():
+                logger.warning("=== BOOT: First boot of day. Fetching full historical data from broker REST API (runs once/day only)... ===")
+                try:
+                    live_df = self.fetcher.get_historical_candles_with_synthetic_volume(days_back=2)
+                    if not live_df.empty:
+                        live_df['timestamp'] = pd.to_datetime(live_df['timestamp'])
+                        live_df = live_df.drop_duplicates(subset=['timestamp']).sort_values('timestamp')
+                        live_df = live_df.tail(750).reset_index(drop=True)
 
-                if boot_stamp_file.exists():
-                    logger.warning(f"=== BOOT: REST fetch already done today ({today_str}). Skipping to protect exit strategy API quota. Starting with empty warmup. ===")
-                    # The session had data earlier but it's been cleaned/lost mid-session.
-                    # Start blank — indicators warm up over 130 bars from live ticks.
-                    empty_df = pd.DataFrame({
-                        'timestamp': pd.Series(dtype='datetime64[ns]'),
-                        'open': pd.Series(dtype='float32'),
-                        'high': pd.Series(dtype='float32'),
-                        'low': pd.Series(dtype='float32'),
-                        'close': pd.Series(dtype='float32'),
-                        'synth_vol': pd.Series(dtype='int32')
-                    })
-                    self.cached_volume_df = empty_df.set_index('timestamp')[['synth_vol']]
-                    self.cached_price_df = empty_df.set_index('timestamp')[['open', 'high', 'low', 'close']]
-                    with self._df_lock:
-                        self.current_df = empty_df
-                    logger.info("=== BOOT COMPLETE: Engine Online (Warmup Mode — REST quota protected) ===")
-                else:
-                    # First boot of the day — safe to make the 50-constituent REST fetch.
-                    logger.warning("=== BOOT: First boot of day. Fetching full historical data from broker REST API (runs once/day only)... ===")
-                    try:
-                        live_df = self.fetcher.get_historical_candles_with_synthetic_volume(days_back=2)
-                        if not live_df.empty:
-                            live_df['timestamp'] = pd.to_datetime(live_df['timestamp'])
-                            live_df = live_df.drop_duplicates(subset=['timestamp']).sort_values('timestamp')
-                            live_df = live_df.tail(750).reset_index(drop=True)
+                        # Fix 2: Assert >= 130 bars before declaring boot complete from REST
+                        if len(live_df) < 130:
+                            raise ValueError(f"REST fetch returned only {len(live_df)} bars (need >= 130). Insufficient for indicators.")
 
-                            if 'volume' in live_df.columns and 'synth_vol' not in live_df.columns:
-                                live_df['synth_vol'] = live_df['volume']
-                            elif 'synth_vol' not in live_df.columns:
-                                live_df['synth_vol'] = 0
+                        if 'volume' in live_df.columns and 'synth_vol' not in live_df.columns:
+                            live_df['synth_vol'] = live_df['volume']
+                        elif 'synth_vol' not in live_df.columns:
+                            live_df['synth_vol'] = 0
 
-                            fcols = live_df.select_dtypes('float').columns
-                            icols = live_df.select_dtypes('integer').columns
-                            live_df[fcols] = live_df[fcols].astype('float32')
-                            live_df[icols] = live_df[icols].astype('int32')
+                        fcols = live_df.select_dtypes('float').columns
+                        icols = live_df.select_dtypes('integer').columns
+                        live_df[fcols] = live_df[fcols].astype('float32')
+                        live_df[icols] = live_df[icols].astype('int32')
 
-                            self.cached_volume_df = live_df.set_index('timestamp')[['synth_vol']]
-                            self.cached_price_df = live_df.set_index('timestamp')[['open', 'high', 'low', 'close']]
-                            with self._df_lock:
-                                self.current_df = live_df
-
-                            # Write the daily stamp so mid-session reboots skip this fetch
-                            boot_stamp_file.parent.mkdir(parents=True, exist_ok=True)
-                            boot_stamp_file.touch()
-                            logger.info(f"=== BOOT COMPLETE: Engine Online from Live REST Fetch ({len(live_df)} bars, synth_vol ready) ===")
-                        else:
-                            raise ValueError("Empty DataFrame from historical fetch")
-                    except Exception as fetch_err:
-                        logger.warning(f"=== BOOT: Live historical fetch failed ({fetch_err}). Starting with empty DataFrame — VWAP/VFI will warm up over ~130 bars. ===")
-                        empty_df = pd.DataFrame({
-                            'timestamp': pd.Series(dtype='datetime64[ns]'),
-                            'open': pd.Series(dtype='float32'),
-                            'high': pd.Series(dtype='float32'),
-                            'low': pd.Series(dtype='float32'),
-                            'close': pd.Series(dtype='float32'),
-                            'synth_vol': pd.Series(dtype='int32')
-                        })
-                        self.cached_volume_df = empty_df.set_index('timestamp')[['synth_vol']]
-                        self.cached_price_df = empty_df.set_index('timestamp')[['open', 'high', 'low', 'close']]
+                        self.cached_volume_df = live_df.set_index('timestamp')[['synth_vol']]
+                        self.cached_price_df = live_df.set_index('timestamp')[['open', 'high', 'low', 'close']]
                         with self._df_lock:
-                            self.current_df = empty_df
-                        logger.info("=== BOOT COMPLETE: Engine Online (Fresh Start, no historical data) ===")
+                            self.current_df = live_df
 
+                        # Write the daily stamp so mid-session reboots skip this fetch
+                        boot_stamp_file.parent.mkdir(parents=True, exist_ok=True)
+                        boot_stamp_file.touch()
+                        logger.info(f"=== BOOT COMPLETE: Engine Online from Live REST Fetch ({len(live_df)} bars, synth_vol ready) ===")
+                    else:
+                        raise ValueError("Empty DataFrame from historical fetch")
+                except Exception as fetch_err:
+                    logger.error(f"=== BOOT ERROR: Live historical fetch failed ({fetch_err}). ===")
+                    # Fallback to local cache if present
+                    if dfs:
+                        logger.warning("=== BOOT FALLBACK: Attempting to boot from local disk cache after REST fetch failure... ===")
+                        self._boot_from_local_disk(dfs)
+                    else:
+                        logger.warning("=== BOOT: Starting with empty DataFrame — VWAP/VFI will warm up over ~130 bars. ===")
+                        self._boot_empty_warmup()
 
+            # 2. Mid-Session Reboot (Stamp already exists) -> Use cache
+            else:
+                logger.info(f"=== BOOT: Mid-session reboot detected (REST fetch already done today: {today_str}). ===")
+                if dfs:
+                    self._boot_from_local_disk(dfs)
+                else:
+                    logger.warning("=== BOOT: No disk cache found for mid-session reboot. Starting with empty warmup. ===")
+                    self._boot_empty_warmup()
 
         except Exception as e:
             logger.critical(f"BOOT ERROR: {e}")
@@ -1188,6 +1183,13 @@ class BrainService:
                     eval_min = min(self.logic_eval_times) if self.logic_eval_times else 0.0
                     eval_95th = float(np.percentile(self.logic_eval_times, 95)) if self.logic_eval_times else 0.0
 
+                    # Calculate Warmup Status
+                    curr_df = self.current_df
+                    if curr_df is not None and not curr_df.empty:
+                        warmup_status = "READY" if len(curr_df) >= 130 else f"WARMING_UP ({len(curr_df)}/130)"
+                    else:
+                        warmup_status = "NO_DATA"
+
                     # Publish Telemetry for UI
                     telemetry = {
                         "symbol": self.anchor_symbol,
@@ -1201,6 +1203,7 @@ class BrainService:
                         "compression": float(latest_bar.get('compression', 0.0)),
                         "atr_expansion": float(latest_bar.get('atr_expansion', 1.0)),
                         "strategy_stats": self.strategy_stats,
+                        "warmup_status": warmup_status,
                         "market_personality_score": p_score,
                         "tick_seq_counter": self.tick_seq_counter,
                         "research_queue_health": self.research_service.get_queue_health(),

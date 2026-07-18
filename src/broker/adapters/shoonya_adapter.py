@@ -463,6 +463,10 @@ class ShoonyaHistoricalProvider(IHistoricalProvider):
         from src.utils.logger import get_logger
         logger = get_logger("shoonya_adapter")
 
+        # Index tokens on Shoonya must use 'IDX' exchange for historical data
+        if token in ["26000", "26009", "26017", "99926000", "99926017"] and exchange in ["NSE", "BSE"]:
+            exchange = "IDX"
+
         # Shoonya expects UNIX timestamp (seconds) or date string
         start_ts = int(start_time.timestamp())
         end_ts = int(end_time.timestamp())

@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and this project adheres to Semantic Versioning.
 
+## [1.0.3-hotfix] — 2026-07-18
+
+Corrective patch to address morning boot indicator calculation failures and ZMQ/Broker data discrepancies on the VPS.
+
+### Fixed
+- **Shoonya Index Exchange Mapping (`src/broker/adapters/shoonya_adapter.py`):** Added an exchange mapping override inside `ShoonyaHistoricalProvider.get_historical()`. If an index token (e.g. `26000`, `99926000`) is queried with exchange `NSE` or `BSE`, the adapter dynamically overrides the exchange segment to `IDX`. This resolves the `Empty DataFrame` error where Nifty index candles were rejected on the `NSE` segment historically, restoring end-to-end historical REST fetch.
+- **Inverted Boot Priority (`src/services/brain_service.py`):** Changed `boot_sequence` to check the calendar day's boot stamp (`.boot_fetched_{today}`) *before* loading disk cache. If the stamp does not exist (first boot of the day), the engine always performs a full historical REST fetch to load a clean 2-day history (~750 bars with constituent volume), ensuring the minimum 130-candle indicator requirement is met immediately at startup. Mid-session reboots (stamp exists) continue to load from disk and run `BootGapFill` for the short gap.
+- **REST Fetch Length Validation (`src/services/brain_service.py`):** Added safety assertion requiring `len(live_df) >= 130` before declaring boot complete from REST. Fails back to local cache or warmup mode if the API returns insufficient data.
+
+### Added
+- **Warmup Status Telemetry (`src/services/brain_service.py`):** Added a `warmup_status` string (`READY`, `WARMING_UP (X/130)`, or `NO_DATA`) to the telemetry payload published to the dashboard, providing visual clarity on data loading state.
+
+### Infrastructure
+- **Deployment:** Patched `shoonya_adapter.py` and `brain_service.py` deployed to Oracle Cloud VPS (`137.23.41.38`) via SCP. Syntax compiled cleanly.
+- **Agent Signature:** Diagnostic, token mapping discovery, and fixes applied by **GitHub Antigravity (builtin:zai-start-plan/GLM-5.2)** on 2026-07-18.
+
+---
+
 ## [1.0.1-hotfix] — 2026-07-16
 
 Critical hotfix patch for QOT terminal freeze and backend crashes on Oracle Cloud VPS (1 GB RAM, 2 CPU). Addresses ZMQ socket instability and DataFrame dtype corruption causing runtime exceptions during live market data processing.
